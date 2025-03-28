@@ -19,11 +19,14 @@
 #ifndef __COMPILER__
 #define __COMPILER__
 
+#if defined __GNUC__
+
 #if defined __DJGPP__
 //DJGPP
 #include <dpmi.h>
 #include <go32.h>
 #include <sys/nearptr.h>
+#include <pc.h>
 
 #define mkdir(x) mkdir(x,0)
 
@@ -58,7 +61,41 @@ asm								\
 	: "m" (OldInt.pm_offset)	\
 )
 
+#else
 
+#include <ctype.h>
+#include <sys/stat.h>
+
+#define mkdir(x) mkdir(x,0)
+
+//DJGPP doesn't inline inp, outp and outpw,
+//but it does inline inportb, outportb and outportw
+#define inp(port) 0
+#define outp(port,data)
+#define outpw(port,data)
+
+#define __djgpp_conventional_base 0
+
+static char* strupr(char* s)
+{
+    char* tmp = s;
+
+    for (;*tmp;++tmp) {
+        *tmp = toupper((unsigned char) *tmp);
+    }
+
+    return s;
+}
+
+static long filelength(int fd)
+{
+	struct stat st;
+	if (fstat(fd, &st) == -1)
+		return -1;
+	return st.st_size;
+}
+
+#endif
 
 #elif defined __DMC__
 //Digital Mars
@@ -151,26 +188,6 @@ typedef struct {
 	uint32_t	size_of_paging_file_partition_in_pages;
 	uint32_t	reserved[3];
 } __dpmi_free_mem_info;
-
-#if !defined C_ONLY
-#pragma aux FixedMul =	\
-	"imul ecx",			\
-	"shrd eax, edx, 16"	\
-	value	[eax]		\
-	parm	[eax] [ecx] \
-	modify	[edx]
-
-typedef int32_t fixed_t;
-fixed_t	FixedDiv2 (fixed_t a, fixed_t b);
-#pragma aux FixedDiv2 =		\
-	"cdq",					\
-	"shld edx, eax, 16",	\
-	"shl eax, 16",			\
-	"idiv ecx"				\
-	value	[eax]			\
-	parm	[eax] [ecx] 	\
-	modify	[edx]
-#endif
 
 
 

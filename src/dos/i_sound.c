@@ -18,9 +18,9 @@
 
 // I_SOUND.C
 
-#include "doomdef.h"
+#include "../doomdef.h"
 #include "dmx.h"
-#include "sounds.h"
+#include "../sounds.h"
 
 #define SND_TICRATE     140     // tic rate for updating sound
 #define SND_MAXSONGS    40      // max number of songs in game

@@ -20,9 +20,12 @@
 
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#else
 #include <direct.h>
 #include <io.h>
 #include <dos.h>
+#endif
 #include "doomdef.h"
 #include "soundst.h"
 #include "dutils.h"
@@ -155,94 +158,6 @@ void D_ProcessEvents (void)
 			continue;               // menu ate the event
 		G_Responder(ev);
 	}
-}
-
-/*
-================
-=
-= FixedMul and FixedDiv
-=
-================
-*/
-
-#if defined C_ONLY
-fixed_t	FixedMul (fixed_t a, fixed_t b)
-{
-	return ((int64_t) a * (int64_t) b) >> FRACBITS;
-}
-
-static fixed_t FixedDiv2 (fixed_t a, fixed_t b)
-{
-	int64_t result = ((int64_t) a << FRACBITS) / b;
-	return (fixed_t) result;
-}
-#else
-
-#if defined __DJGPP__
-fixed_t FixedMul(fixed_t a, fixed_t b)
-{
-	asm
-	(
-		"imul %2 \n"
-		"shrd $16, %%edx, %%eax"
-		: "=a" (a)
-		: "a" (a), "r" (b)
-		: "edx"
-	);
-	return a;
-}
-
-static fixed_t FixedDiv2(fixed_t a, fixed_t b)
-{
-	asm
-	(
-		"cdq \n"
-		"shld $16, %%eax, %%edx \n"
-		"shl  $16, %%eax \n"
-		"idiv %2"
-		: "=a" (a)
-		: "a" (a), "r" (b)
-		: "edx"
-	);
-	return a;
-}
-
-#elif defined __DMC__ || defined __CCDL__
-fixed_t FixedMul(fixed_t a, fixed_t b)
-{
-	asm
-	{
-		mov eax, [a]
-		mov ecx, [b]
-		imul ecx
-		shrd eax, edx, 16
-	};
-	return _EAX;
-}
-
-static fixed_t FixedDiv2(fixed_t a, fixed_t b)
-{
-	asm
-	{
-		mov eax, [a]
-		mov ecx, [b]
-		cdq
-		shld edx, eax, 16
-		shl eax, 16
-		idiv ecx
-	};
-	return _EAX;
-}
-#endif
-
-#endif
-
-fixed_t FixedDiv (fixed_t a, fixed_t b)
-{
-	if ( (abs(a)>>14) >= abs(b))
-		return ((a ^ b) >> 31) ^ MAXINT;
-	else
-		return FixedDiv2 (a,b);
 }
 
 /*
@@ -605,6 +520,21 @@ void D_StartTitle (void)
 
 static char title[128]; //      print title for every printed line
 
+#ifdef __linux__
+
+static void tprintf(char *msg, int32_t fgcolor, int32_t bgcolor) {
+	printf("\033[%d;%dm%s\033[0m", bgcolor, fgcolor, msg);
+}
+
+void mprintf(char *msg) {
+	int32_t x, y;
+	printf("%s", msg);
+
+	tprintf(title, FGCOLOR, BGCOLOR);
+}
+
+#else
+
 static int32_t GetTextX(void)
 {
 	union REGS regs;
@@ -675,6 +605,8 @@ void mprintf(char *msg)
 
 	SetTextPos(x, y);
 }
+
+#endif
 
 /*
 ===============
@@ -950,7 +882,6 @@ static void FindResponseFile (void)
 
 void D_DoomMain (void)
 {
-	union REGS regs;
 	int32_t p;
 	char file[256];
 
@@ -1047,10 +978,12 @@ void D_DoomMain (void)
 				 VERSION/100,VERSION%100);
 	}
 
+#ifndef __linux__
+	union REGS regs;
 	regs.h.ah = 0;
 	regs.h.al = 3;
 	int386 (0x10, &regs, &regs);
-
+#endif
 	tprintf (title, FGCOLOR, BGCOLOR);
 
 #if (APPVER_DOOMREV < AV_DR_DM19)
@@ -1065,6 +998,10 @@ void D_DoomMain (void)
 	if (M_CheckParm("-cdrom"))
 	{
 		printf(D_CDROM);
+#ifdef __linux__
+		mkdir("/tmp/doomdata");
+		strcpy (basedefault,"/tmp/doomdata/default.cfg");
+#else
 #if (APPVER_DOOMREV < AV_DR_DM1666E)
 		mkdir("c:doomdata");
 #elif (APPVER_DOOMREV < AV_DR_DM17)
@@ -1073,6 +1010,7 @@ void D_DoomMain (void)
 		mkdir("c:\\doomdata");
 #endif
 		strcpy (basedefault,"c:/doomdata/default.cfg");
+#endif
 	}	
 	
 	// turbo option

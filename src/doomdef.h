@@ -21,7 +21,7 @@
 #ifndef __DOOMDEF__
 #define __DOOMDEF__
 
-#include "id_heads.h"
+#include "common.h"
 
 // VERSIONS RESTORATION
 // This *must* be included (near) the beginning for every compilation unit
@@ -640,8 +640,115 @@ extern boolean autostart;
 */
 
 
-fixed_t	FixedMul (fixed_t a, fixed_t b);
-fixed_t	FixedDiv (fixed_t a, fixed_t b);
+/*
+================
+=
+= FixedMul and FixedDiv
+=
+================
+*/
+
+#if defined C_ONLY
+static fixed_t	FixedMul (fixed_t a, fixed_t b)
+{
+	return ((int64_t) a * (int64_t) b) >> FRACBITS;
+}
+
+static fixed_t FixedDiv2 (fixed_t a, fixed_t b)
+{
+	int64_t result = ((int64_t) a << FRACBITS) / b;
+	return (fixed_t) result;
+}
+#else
+
+#if defined __GNUC__
+
+inline static fixed_t FixedMul(fixed_t a, fixed_t b)
+{
+	asm
+	(
+		"imul %2 \n"
+		"shrd $16, %%edx, %%eax"
+		: "=a" (a)
+		: "a" (a), "r" (b)
+		: "edx"
+	);
+	return a;
+}
+
+inline static fixed_t FixedDiv2(fixed_t a, fixed_t b)
+{
+	asm
+	(
+		"cdq \n"
+		"shld $16, %%eax, %%edx \n"
+		"shl  $16, %%eax \n"
+		"idiv %2"
+		: "=a" (a)
+		: "a" (a), "r" (b)
+		: "edx"
+	);
+	return a;
+}
+
+#elif defined __DMC__ || defined __CCDL__
+static fixed_t FixedMul(fixed_t a, fixed_t b)
+{
+	asm
+	{
+		mov eax, [a]
+		mov ecx, [b]
+		imul ecx
+		shrd eax, edx, 16
+	};
+	return _EAX;
+}
+
+static fixed_t FixedDiv2(fixed_t a, fixed_t b)
+{
+	asm
+	{
+		mov eax, [a]
+		mov ecx, [b]
+		cdq
+		shld edx, eax, 16
+		shl eax, 16
+		idiv ecx
+	};
+	return _EAX;
+}
+#else // WATCOM
+
+#pragma aux FixedMul =	\
+	"imul ecx",			\
+	"shrd eax, edx, 16"	\
+	value	[eax]		\
+	parm	[eax] [ecx] \
+	modify	[edx]
+
+fixed_t	FixedDiv2 (fixed_t a, fixed_t b);
+#pragma aux FixedDiv2 =		\
+	"cdq",					\
+	"shld edx, eax, 16",	\
+	"shl eax, 16",			\
+	"idiv ecx"				\
+	value	[eax]			\
+	parm	[eax] [ecx] 	\
+	modify	[edx]
+
+
+#endif
+
+#endif
+
+static fixed_t FixedDiv (fixed_t a, fixed_t b)
+{
+	if ( (abs(a)>>14) >= abs(b))
+		return ((a ^ b) >> 31) ^ MAXINT;
+	else
+		return FixedDiv2 (a,b);
+}
+
 
 #ifdef __BIG_ENDIAN__
 int16_t ShortSwap(int16_t);

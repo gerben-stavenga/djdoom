@@ -17,7 +17,7 @@
 // mus2mid.c - Ben Ryves 2006 - http://benryves.com - benryves@benryves.com
 // Use to convert a MUS file into a single track, type 0 MIDI file.
 
-#include "id_heads.h"
+#include "../common.h"
 
 #define NUM_CHANNELS 16
 

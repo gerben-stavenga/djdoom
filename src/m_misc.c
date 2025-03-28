@@ -21,7 +21,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <io.h>
 #include "doomdef.h"
 #include "hu_stuff.h"
 #include "soundst.h"
@@ -47,7 +46,7 @@ int32_t M_CheckParm (char *check)
 
 	for (i = 1;i<myargc;i++)
 	{
-		if ( !stricmp(check, myargv[i]) )
+		if ( !strcasecmp(check, myargv[i]) )
 			return i;
 	}
 

@@ -19,12 +19,14 @@
 // W_wad.c
 
 #include <ctype.h>
-#include <io.h>
 #include <unistd.h>
 #include <fcntl.h>
 
 #include "doomdef.h"
 
+#ifndef O_BINARY
+    #define O_BINARY 0  /* Define as 0 on platforms where it doesn't exist */
+#endif
 
 //===============
 //   TYPES
@@ -140,7 +142,7 @@ static void W_AddFile (char *filename)
 	printf ("	adding %s\n",filename);
 	startlump = numlumps;
 	
-	if (stricmp (filename+strlen(filename)-3 , "wad" ) )
+	if (strcasecmp (filename+strlen(filename)-3 , "wad" ) )
 	{
 	// single lump file
 		fileinfo = &singleinfo;

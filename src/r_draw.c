@@ -20,8 +20,6 @@
 
 // R_draw.c
 
-#include <conio.h>
-#include <dos.h>
 #include "doomdef.h"
 #include "r_local.h"
 
@@ -58,12 +56,16 @@ fixed_t			dc_iscale		__attribute__ ((externally_visible));
 fixed_t			dc_texturemid	__attribute__ ((externally_visible));
 byte			*dc_source		__attribute__ ((externally_visible));		// first pixel in a column (possibly virtual)
 
-#if defined C_ONLY
+extern char R_ScaleColumnAsm asm ("_R_ScaleColumnAsm");
+extern char R_ScaleRowAsm asm("_R_ScaleRowAsm");
+
+void* call_dest asm("_call_dest");
+
 void R_DrawColumn (void)
 {
 	int32_t		count;
 	byte		*dest;
-	fixed_t		frac, fracstep;	
+	uint32_t		frac, frac2, fracstep;	
 
 	count = dc_yh - dc_yl;
 	if (count < 0)
@@ -75,17 +77,15 @@ void R_DrawColumn (void)
 #endif
 
 	outp (SC_INDEX+1,1<<(dc_x&3));
-	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2);
+	dest = destview + (dc_yh + 1)*PLANEWIDTH + (dc_x>>2);
 	
-	fracstep = dc_iscale;
-	frac = dc_texturemid + (dc_yl-centery)*fracstep;
+	fracstep = dc_iscale << 9;
+	frac = frac2 = (dc_texturemid << 9) + (dc_yl-centery)*fracstep;
 
-	do
-	{
-		*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
-		dest += PLANEWIDTH;
-		frac += fracstep;
-	} while (count--);
+
+	call_dest = (char*)&R_ScaleColumnAsm + 3 - 17 * (count + 1);
+	lighttable_t *colormap = dc_colormap;
+	asm volatile("call *(_call_dest)": "+a"(colormap), "+c"(frac), "+d"(frac2): "D"(dest), "S"(dc_source), "b"(fracstep) : "memory");
 }
 
 void R_DrawColumnLow (void)
@@ -119,7 +119,6 @@ void R_DrawColumnLow (void)
 		frac += fracstep;
 	} while (count--);
 }
-#endif
 
 
 #define FUZZTABLE	50
@@ -278,28 +277,24 @@ void R_InitTranslationTables (void)
 ================
 */
 
-int32_t			ds_y			__attribute__ ((externally_visible));
-int32_t			ds_x1			__attribute__ ((externally_visible));
-int32_t			ds_x2			__attribute__ ((externally_visible));
-lighttable_t	*ds_colormap	__attribute__ ((externally_visible));
-fixed_t			ds_xfrac		__attribute__ ((externally_visible));
-fixed_t			ds_yfrac		__attribute__ ((externally_visible));
-fixed_t			ds_xstep		__attribute__ ((externally_visible));
-fixed_t			ds_ystep		__attribute__ ((externally_visible));
-byte			*ds_source		__attribute__ ((externally_visible));		// start of a 64*64 tile image
+int32_t			ds_y;
+int32_t			ds_x1;
+int32_t			ds_x2;
+lighttable_t	*ds_colormap;
+fixed_t			ds_xfrac;
+fixed_t			ds_yfrac;
+fixed_t			ds_xstep;
+fixed_t			ds_ystep;
+byte			*ds_source;		// start of a 64*64 tile image
 
-#if defined C_ONLY
 void R_DrawSpan (void) 
 { 
-    fixed_t		xfrac;
-    fixed_t		yfrac; 
+    fixed_t		frac;
+    fixed_t		dfrac; 
     byte*		dest; 
-    int32_t		spot; 
-        int32_t                     i;
-        int32_t                     prt;
-        int32_t                     dsp_x1;
-        int32_t                     dsp_x2;
-        int32_t                     countp;
+	int32_t                     dsp_x1;
+	int32_t                     dsp_x2;
+	int32_t                     countp;
          
 #ifdef RANGECHECK 
     if (ds_x2 < ds_x1
@@ -312,34 +307,28 @@ void R_DrawSpan (void)
     } 
 #endif 
 
-	for (i = 0; i < 4; i++)
-	{
-		dsp_x1 = (ds_x1-i)/4;
-		if (dsp_x1*4+i<ds_x1)
-			dsp_x1++;
-		dsp_x2 = (ds_x2-i)/4;
-		countp = dsp_x2 - dsp_x1;
-		if (countp >= 0) {
-			outp (SC_INDEX+1,1<<i); 
-			dest = destview + ds_y*PLANEWIDTH + dsp_x1;
+	frac = (((ds_xfrac - ds_xstep) >> 6) & 0xFFFF) | ((ds_yfrac << 10) & 0xFFFF0000);
+	dfrac = ((ds_xstep >> 6) & 0xFFFF) | ((ds_ystep << 10) & 0xFFFF0000);
+	lighttable_t *colormap = ds_colormap;
+	int count = ds_x2 - ds_x1;
+	if (count < 0) return;
+	#pragma GCC unroll 4
+	for (int i = 0; i < 4; i++) {
+		dsp_x1 = (unsigned)(ds_x1 + i) >> 2;
+		countp = (count - i ) >> 2;
+		if (countp < 0) break;
 
-			prt = dsp_x1*4-ds_x1+i;
-			xfrac = ds_xfrac+ds_xstep*prt;
-			yfrac = ds_yfrac+ds_ystep*prt;
+		uint32_t plane = (ds_x1 + i) & 3;
+		outp (SC_INDEX + 1, 1 << plane);
+		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1;
+		call_dest = (char*)&R_ScaleRowAsm - 19 * ((countp & 31) + 1);
 
-			do
-			{
-				// Current texture index in u,v.
-				spot = ((yfrac>>(16-6))&(63*64)) + ((xfrac>>16)&63);
-
-				// Lookup pixel from flat texture tile,
-				//  re-index using light/colormap.
-				*dest++ = ds_colormap[ds_source[spot]];
-				// Next step in u,v.
-				xfrac += ds_xstep*4; 
-				yfrac += ds_ystep*4;
-			} while (countp--);
-		}
+		dfrac <<= 2;
+		fixed_t frac2 = frac;
+		fixed_t frac3 = frac;
+		asm volatile("call *(_call_dest)": "+a"(colormap), "+c"(frac2), "+d"(frac3): "D"(dest), "S"(ds_source), "b"(dfrac) : "memory");
+		dfrac >>=2;
+		frac += dfrac;
 	}
 } 
 
@@ -417,7 +406,6 @@ void R_DrawSpanLow (void)
 		} while (countp--);
 	}
 }
-#endif
 
 
 
