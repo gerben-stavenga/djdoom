@@ -18,12 +18,19 @@
 
 // I_IBM.C
 
+#include <assert.h>
 #include <stdarg.h>
+
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+#include <signal.h>
+
 #include "../doomdef.h"
 #include "../r_local.h"
 
 #define DPMI_INT 0x31
-//#define NOTIMER
+#define NOTIMER
 
 void I_StartupSound (void);
 void I_ShutdownSound (void);
@@ -36,6 +43,19 @@ static void I_ReadMouse (void);
 static void I_InitDiskFlash (void);
 
 extern  int32_t     usemouse, usejoystick;
+
+Display*	X_display=0;
+Window		X_mainWindow;
+Colormap	X_cmap;
+Visual*		X_visual;
+GC		X_gc;
+XEvent		X_event;
+int		X_screen;
+XVisualInfo	X_visualinfo;
+XImage*		image;
+int		X_width;
+int		X_height;
+
 
 
 /*
@@ -248,6 +268,8 @@ void I_WaitVBL (int32_t vbls)
 ===================
 */
 
+uint32_t color_palette[256];
+
 void I_SetPalette (byte *palette)
 {
 	int32_t	i;
@@ -256,9 +278,13 @@ void I_SetPalette (byte *palette)
 		return;
 
 	I_WaitVBL (1);
-	outp (PEL_WRITE_ADR, 0);
-	for (i = 0; i < 768; i++)
-		outp (PEL_DATA, (gammatable[usegamma][*palette++])>>2);
+	for (i = 0; i < 256; i++)
+	{
+		uint32_t red = gammatable[usegamma][*palette++];
+		uint32_t green = gammatable[usegamma][*palette++];
+		uint32_t blue = gammatable[usegamma][*palette++];
+		color_palette[i] = (red << 16) | (green << 8) | blue | (0xff << 24);
+	}
 }
 
 /*
@@ -269,7 +295,7 @@ void I_SetPalette (byte *palette)
 ============================================================================
 */
 
-static byte *screen, *currentscreen;
+byte *screen, *currentscreen;
 byte *destscreen;
 byte *destview	__attribute__ ((externally_visible));
 
@@ -305,13 +331,11 @@ static void I_UpdateBox (int32_t x, int32_t y, int32_t width, int32_t height)
 	ofs = y*SCREENWIDTH+(x1<<3);
 	srcdelta = SCREENWIDTH - (wwide<<3);
 	destdelta = PLANEWIDTH/2 - wwide;
-	outp (SC_INDEX, SC_MAPMASK);
 
 	for (p = 0 ; p < 4 ; p++)
 	{
-		outp (SC_INDEX+1, 1<<p);
 		source = screens[0] + ofs + p;
-		dest = (int16_t *)(destscreen + (ofs>>2));
+		dest = (int16_t *)(destscreen + (ofs>>2) + (p << 16));
 		for (y=0 ; y<height ; y++)
 		{
 			for (x=wwide ; x ; x--)
@@ -361,11 +385,11 @@ void I_UpdateNoBlit(void)
 	memcpy (voldupdatebox, oldupdatebox, sizeof(oldupdatebox));
 	memcpy (oldupdatebox, dirtybox, sizeof(dirtybox));
 
-	if (updatebox[BOXTOP] >= updatebox[BOXBOTTOM])
+	if (updatebox[BOXTOP] >= updatebox[BOXBOTTOM]) {
 		I_UpdateBox (updatebox[BOXLEFT], updatebox[BOXBOTTOM],
 			updatebox[BOXRIGHT] - updatebox[BOXLEFT] + 1,
 			updatebox[BOXTOP] - updatebox[BOXBOTTOM] + 1);
-
+	}
 	M_ClearBox (dirtybox);
 }
 
@@ -389,8 +413,6 @@ void I_FinishUpdate (void)
 		lasttic = I_GetTime();
 		if (tics > 20) tics = 20;
 
-		outpw (SC_INDEX, SC_MAPMASK | (1 << 8));
-
 		for (i=0 ; i<tics ; i++)
 			destscreen[ (SCREENHEIGHT-1)*PLANEWIDTH + i] = 0xff;
 		for ( ; i<20 ; i++)
@@ -398,12 +420,35 @@ void I_FinishUpdate (void)
 	}
 
 	// page flip
-	outpw (CRTC_INDEX, CRTC_STARTHIGH+((int32_t)destscreen&0xff00));
+	for (int i = 0; i < SCREENHEIGHT; i++) {
+		byte* src = destscreen + i * SCREENWIDTH / 4;
+		uint32_t x = 0;
+		uint32_t* data = (uint32_t*)(image->data + i * image->bytes_per_line);
+		for (int j = 0; j < SCREENWIDTH / 4; j++) {
+			data[x++] = color_palette[src[j]];
+			data[x++] = color_palette[src[j + (1<<16)]];
+			data[x++] = color_palette[src[j + (2<<16)]];
+			data[x++] = color_palette[src[j + (3<<16)]];
+		}
+	}
+
+	XPutImage(	X_display,
+		X_mainWindow,
+		X_gc,
+		image,
+		0, 0,
+		0, 0,
+		X_width, X_height );
+
+	// sync up with server
+	XSync(X_display, False);
 
 	destscreen += 0x4000;
-	if ( (int32_t)destscreen == (int32_t)(0xac000 + __djgpp_conventional_base))
-		destscreen = (byte *)(0xa0000 + __djgpp_conventional_base);
+	if ( (int32_t)destscreen == (int32_t)(screen + 0xc000))
+		destscreen = screen;
 }
+
+
 
 /*
 ===================
@@ -419,10 +464,116 @@ void I_InitGraphics (void)
 	if (novideo)
 		return;
 	grmode = true;
-	screen = currentscreen = (byte *)(0xa0000 + __djgpp_conventional_base);
-	destscreen = (byte *)(0xa4000 + __djgpp_conventional_base);
+	screen = malloc((1<<16) * 4);
+	currentscreen = screen;
+	destscreen = screen + 0xa4000;
 	I_SetPalette (W_CacheLumpName("PLAYPAL", PU_CACHE));
 	I_InitDiskFlash ();
+
+    char*		displayname;
+    char*		d;
+    int			n;
+    int			pnum;
+    int			x=0;
+    int			y=0;
+    
+    // warning: char format, different type arg
+    char		xsign=' ';
+    char		ysign=' ';
+    
+    int			oktodraw;
+    unsigned long	attribmask;
+    XSetWindowAttributes attribs;
+    XGCValues		xgcvalues;
+    int			valuemask;
+    static int		firsttime=1;
+
+    X_width = SCREENWIDTH;
+    X_height = SCREENHEIGHT;
+
+	if (!firsttime) return;
+    firsttime = 0;
+
+    signal(SIGINT, (void (*)(int)) I_Quit);
+
+	displayname = 0;
+
+    // open the display
+    X_display = XOpenDisplay(displayname);
+    if (!X_display) {
+		if (displayname)
+			I_Error("Could not open display [%s]", displayname);
+		else
+			I_Error("Could not open display (DISPLAY=[%s])", getenv("DISPLAY"));
+    }
+
+    // use the default visual 
+    X_screen = DefaultScreen(X_display);
+    if (!XMatchVisualInfo(X_display, X_screen, 32, TrueColor, &X_visualinfo)) {
+		I_Error("xdoom currently only supports 32bit-color TrueColor screens");
+	}
+    X_visual = X_visualinfo.visual;
+
+    // create the colormap
+    X_cmap = XCreateColormap(X_display, RootWindow(X_display, X_screen), X_visual, AllocNone);
+
+    // setup attributes for main window
+    attribmask = CWEventMask | CWColormap | CWBorderPixel;
+    attribs.event_mask =
+	KeyPressMask
+	| KeyReleaseMask
+	// | PointerMotionMask | ButtonPressMask | ButtonReleaseMask
+	| ExposureMask;
+
+    attribs.colormap = X_cmap;
+    attribs.border_pixel = 0;
+
+    // create the main window
+    X_mainWindow = XCreateWindow(	X_display,
+					RootWindow(X_display, X_screen),
+					x, y,
+					X_width, X_height,
+					0, // borderwidth
+					32, // depth
+					InputOutput,
+					X_visual,
+					attribmask,
+					&attribs );
+
+    // create the GC
+    valuemask = GCGraphicsExposures;
+    xgcvalues.graphics_exposures = False;
+    X_gc = XCreateGC(	X_display,
+  			X_mainWindow,
+  			valuemask,
+  			&xgcvalues );
+
+    // map the window
+    XMapWindow(X_display, X_mainWindow);
+
+    // wait until it is OK to draw
+    oktodraw = 0;
+    while (!oktodraw) {
+		XNextEvent(X_display, &X_event);
+		if (X_event.type == Expose
+			&& !X_event.xexpose.count)
+		{
+			oktodraw = 1;
+		}
+    }
+
+	image = XCreateImage(	X_display,
+    				X_visual,
+    				32,
+    				ZPixmap,
+    				0,
+    				(char*)malloc(X_width * X_height * sizeof(uint32_t)),
+    				X_width, X_height,
+    				32,
+    				X_width * sizeof(uint32_t) );
+
+
+	screens[0] = (unsigned char *) (image->data);
 }
 
 /*
@@ -450,12 +601,10 @@ static void I_ShutdownGraphics (void)
 void I_ReadScreen (byte *scr)
 {
 	int32_t	p, i;
-	outp (GC_INDEX,GC_READMAP);
 	for (p = 0; p < 4; p++)
 	{
-		outp (GC_INDEX+1,p);
 		for (i = 0; i < SCREENWIDTH*SCREENHEIGHT/4; i++)
-			scr[i*4+p] = currentscreen[i];
+			scr[i*4+p] = currentscreen[i] + (p << 16);
 	}
 }
 
@@ -818,27 +967,7 @@ void I_StartFrame (void)
 //
 // joystick events
 //
-	if (!joystickpresent)
-		return;
-
-	I_ReadJoystick ();
-	ev.type = ev_joystick;
-	ev.data1 =  ((inp(0x201) >> 4)&15)^15;
-
-	if (joystickx < joyxl)
-		ev.data2 = -1;
-	else if (joystickx > joyxh)
-		ev.data2 = 1;
-	else
-		ev.data2 = 0;
-	if (joysticky < joyyl)
-		ev.data3 = -1;
-	else if (joysticky > joyyh)
-		ev.data3 = 1;
-	else
-		ev.data3 = 0;
-
-	D_PostEvent (&ev);
+	return;
 }
 
 
@@ -1005,6 +1134,9 @@ static void I_Shutdown (void)
 
 void I_Error (char *error, ...)
 {
+#ifndef __DJGPP__
+	assert(0);
+#else
 	va_list argptr;
 
 	D_QuitNetGame ();
@@ -1014,6 +1146,7 @@ void I_Error (char *error, ...)
 	va_end (argptr);
 	printf ("\n");
 	exit (1);
+#endif
 }
 
 /*
@@ -1157,7 +1290,7 @@ static void I_InitDiskFlash (void)
 	else
 		pic = W_CacheLumpName ("STDISK",PU_CACHE);
 	temp = destscreen;
-	destscreen = (byte *)(0xac000 + __djgpp_conventional_base);
+	destscreen = screen + 0xc000;
 	V_DrawPatchDirect (SCREENWIDTH-16,SCREENHEIGHT-16,pic);
 	destscreen = temp;
 }
@@ -1171,43 +1304,33 @@ void I_BeginRead (void)
 	if (!grmode)
 		return;
 
-// write through all planes
-	outp (SC_INDEX,SC_MAPMASK);
-	outp (SC_INDEX+1,15);
-// set write mode 1
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)|1);
+	// copy to backup
+	for (int i = 0; i < 4; i++) {
+		src = currentscreen + 184*PLANEWIDTH + 304/4 + (i << 16);
+		dest = screen + 0xc000 + 184*PLANEWIDTH + 288/4 + (i << 16);
+		for (y=0 ; y<16 ; y++)
+		{
+			dest[0] = src[0];
+			dest[1] = src[1];
+			dest[2] = src[2];
+			dest[3] = src[3];
+			src += PLANEWIDTH;
+			dest += PLANEWIDTH;
+		}
 
-// copy to backup
-	src = currentscreen + 184*PLANEWIDTH + 304/4;
-	dest = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 288/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
+	// copy disk over
+		dest = currentscreen + 184*PLANEWIDTH + 304/4;
+		src = screen + 0xc000 + 184*PLANEWIDTH + 304/4;
+		for (y=0 ; y<16 ; y++)
+		{
+			dest[0] = src[0];
+			dest[1] = src[1];
+			dest[2] = src[2];
+			dest[3] = src[3];
+			src += PLANEWIDTH;
+			dest += PLANEWIDTH;
+		}
 	}
-
-// copy disk over
-	dest = currentscreen + 184*PLANEWIDTH + 304/4;
-	src = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 304/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
-	}
-
-
-// set write mode 0
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~1);
 }
 
 // erase disk icon
@@ -1219,30 +1342,20 @@ void I_EndRead (void)
 	if (!grmode)
 		return;
 
-// write through all planes
-	outp (SC_INDEX,SC_MAPMASK);
-	outp (SC_INDEX+1,15);
-// set write mode 1
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)|1);
-
-
-// copy disk over
-	dest = currentscreen + 184*PLANEWIDTH + 304/4;
-	src = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 288/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
+	for (int i = 0; i < 4; i++) {
+		// copy disk over
+		dest = currentscreen + 184*PLANEWIDTH + 304/4 + (i << 16);
+		src = screen + 0xc000 + 184*PLANEWIDTH + 288/4 + (i << 16);
+		for (y=0 ; y<16 ; y++)
+		{
+			dest[0] = src[0];
+			dest[1] = src[1];
+			dest[2] = src[2];
+			dest[3] = src[3];
+			src += PLANEWIDTH;
+			dest += PLANEWIDTH;
+		}
 	}
-
-// set write mode 0
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~1);
 }
 
 

@@ -294,7 +294,8 @@ void I_SetPalette (byte *palette)
 ============================================================================
 */
 
-static byte *screen, *currentscreen;
+byte *screen;
+static byte *currentscreen;
 byte *destscreen;
 byte *destview	__attribute__ ((externally_visible));
 

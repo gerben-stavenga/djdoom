@@ -19,16 +19,28 @@
 cpu 386
 
 PLANEWIDTH		equ	80
-SCREENHEIGHT	equ 200
 
+%ifidn __OUTPUT_FORMAT__,elf
+section .note.GNU-stack noalloc noexec nowrite progbits
+%endif
+
+section .data
+
+extern _loop_count 
+
+%ifidn __OUTPUT_FORMAT__,elf
+section .text
+%endif
 %ifidn __OUTPUT_FORMAT__, coff
 section .text public class=CODE USE32
 %elifidn __OUTPUT_FORMAT__, obj
 section _TEXT public class=CODE USE32
 %endif
 
-%assign ROW SCREENHEIGHT
-%rep SCREENHEIGHT / 2
+next_col_batch:
+	add edi, PLANEWIDTH * 32
+%assign ROW 32
+%rep 32 / 2
 	lea ecx, [edx + ebx]
 	shr edx, 25
 	mov al, [esi + edx]
@@ -43,10 +55,14 @@ section _TEXT public class=CODE USE32
  %endrep
 global _R_ScaleColumnAsm
 _R_ScaleColumnAsm:
+	dec dword [_loop_count]
+	jns next_col_batch
 	ret
 
-%assign COL PLANEWIDTH
-%rep PLANEWIDTH / 2
+next_row_batch:
+	add edi, 32
+%assign COL 32
+%rep 32 / 2
 	lea ecx, [edx + ebx]
 	shr edx, 26
 	shld dx, cx, 6
@@ -63,4 +79,6 @@ _R_ScaleColumnAsm:
  %endrep
 global _R_ScaleRowAsm
 _R_ScaleRowAsm:
+	dec dword [_loop_count]
+	jns next_row_batch
 	ret

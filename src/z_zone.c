@@ -18,6 +18,8 @@
 
 // Z_zone.c
 
+#include <assert.h>
+
 #include "doomdef.h"
 
 /*
@@ -232,6 +234,7 @@ void Z_FreeTags (int32_t lowtag, int32_t hightag)
 	for (block = mainzone->blocklist.next ; block != &mainzone->blocklist 
 	; block = next)
 	{
+		assert(block->id == ZONEID);
 		next = block->next;		// get link before freeing
 		if (!block->user)
 			continue;			// free block

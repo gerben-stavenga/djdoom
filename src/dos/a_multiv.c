@@ -32,8 +32,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <dos.h>
 #include <time.h>
-#include "../common.h"
-#include "dmx.h"
+#include "../id_heads.h"
+#include "../dmx.h"
 #include "a_blast.h"
 #include "a_dma.h"
 #include "a_inter.h"

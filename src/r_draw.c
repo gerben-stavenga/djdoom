@@ -48,7 +48,7 @@ int32_t viewwidth, scaledviewwidth, viewheight, viewwindowx, viewwindowy;
 ==================
 */
 
-lighttable_t	*dc_colormap	__attribute__ ((externally_visible));
+lighttable_t	*dc_colormap;
 int32_t			dc_x			__attribute__ ((externally_visible));
 int32_t			dc_yl			__attribute__ ((externally_visible));
 int32_t			dc_yh			__attribute__ ((externally_visible));
@@ -56,10 +56,11 @@ fixed_t			dc_iscale		__attribute__ ((externally_visible));
 fixed_t			dc_texturemid	__attribute__ ((externally_visible));
 byte			*dc_source		__attribute__ ((externally_visible));		// first pixel in a column (possibly virtual)
 
-extern char R_ScaleColumnAsm asm ("_R_ScaleColumnAsm");
-extern char R_ScaleRowAsm asm("_R_ScaleRowAsm");
+extern void R_ScaleColumnAsm() asm ("_R_ScaleColumnAsm");
+extern void R_ScaleRowAsm() asm("_R_ScaleRowAsm");
 
 void* call_dest asm("_call_dest");
+int32_t loop_count asm("_loop_count");
 
 void R_DrawColumn (void)
 {
@@ -76,20 +77,25 @@ void R_DrawColumn (void)
 		I_Error ("R_DrawColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
 #endif
 
+#ifdef __DJGPP__
 	outp (SC_INDEX+1,1<<(dc_x&3));
-	dest = destview + (dc_yh + 1)*PLANEWIDTH + (dc_x>>2);
+	dest = destview + (dc_yl + (count & 31) + 1)*PLANEWIDTH + (dc_x>>2);
+#else
+	dest = destview + (dc_yl + (count & 31) + 1)*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16);
+#endif
 	
 	fracstep = dc_iscale << 9;
 	frac = frac2 = (dc_texturemid << 9) + (dc_yl-centery)*fracstep;
 
-
-	call_dest = (char*)&R_ScaleColumnAsm + 3 - 17 * (count + 1);
+	loop_count = count >> 5;
+	call_dest = (char*)R_ScaleColumnAsm + 3 - 17 * ((count & 31) + 1);
 	lighttable_t *colormap = dc_colormap;
 	asm volatile("call *(_call_dest)": "+a"(colormap), "+c"(frac), "+d"(frac2): "D"(dest), "S"(dc_source), "b"(fracstep) : "memory");
 }
 
 void R_DrawColumnLow (void)
 {
+#ifdef __DJGPP__
 	int32_t		count;
 	byte		*dest;
 	fixed_t		frac, fracstep;	
@@ -118,6 +124,7 @@ void R_DrawColumnLow (void)
 		dest += PLANEWIDTH;
 		frac += fracstep;
 	} while (count--);
+#endif
 }
 
 
@@ -148,6 +155,7 @@ void R_DrawFuzzColumn (void)
 		I_Error ("R_DrawFuzzColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
 #endif
 
+#ifdef __DJGPP__
 	if (detailshift)
 	{
 		if (dc_x & 1)
@@ -168,6 +176,9 @@ void R_DrawFuzzColumn (void)
 		outp (SC_INDEX+1,1<<(dc_x&3)); 
 		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2); 
 	}
+#else
+	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16); 
+#endif
 
 	fracstep = dc_iscale;
 	frac = dc_texturemid + (dc_yl-centery)*fracstep;
@@ -209,6 +220,7 @@ void R_DrawTranslatedColumn (void)
 		I_Error ("R_DrawTranslatedColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
 #endif
 
+#ifdef __DJGPP__
 	if (detailshift)
 	{
 		if (dc_x & 1)
@@ -223,6 +235,9 @@ void R_DrawTranslatedColumn (void)
 		outp (SC_INDEX+1,1<<(dc_x&3)); 
 		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2); 
 	}
+#else
+	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16);
+#endif
 	
 	fracstep = dc_iscale;
 	frac = dc_texturemid + (dc_yl-centery)*fracstep;
@@ -319,9 +334,15 @@ void R_DrawSpan (void)
 		if (countp < 0) break;
 
 		uint32_t plane = (ds_x1 + i) & 3;
+#ifdef __DJGPP__
 		outp (SC_INDEX + 1, 1 << plane);
 		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1;
-		call_dest = (char*)&R_ScaleRowAsm - 19 * ((countp & 31) + 1);
+#else
+		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1 + (plane << 16);
+#endif
+
+		loop_count = countp >> 5;
+		call_dest = (char*)R_ScaleRowAsm - 19 * ((countp & 31) + 1);
 
 		dfrac <<= 2;
 		fixed_t frac2 = frac;
@@ -334,6 +355,7 @@ void R_DrawSpan (void)
 
 void R_DrawSpanLow (void) 
 { 
+#ifdef __DJGPP__
     fixed_t		xfrac;
     fixed_t		yfrac; 
     byte*		dest; 
@@ -405,6 +427,7 @@ void R_DrawSpanLow (void)
 			yfrac += ds_ystep*2;
 		} while (countp--);
 	}
+#endif
 }
 
 
@@ -492,6 +515,7 @@ void R_FillBackScreen (void)
 	V_DrawPatch (viewwindowx+scaledviewwidth, viewwindowy+viewheight, 1,
 		W_CacheLumpName ("brdr_br",PU_CACHE));
 
+#ifdef __DJGPP__
 	dest = (byte*)(0xac000 + __djgpp_conventional_base);
 	src = screens[1];
 	for (i = 0; i < 4; i++, src++)
@@ -501,6 +525,8 @@ void R_FillBackScreen (void)
 		for (j = 0; j < (SCREENHEIGHT-SBARHEIGHT)*SCREENWIDTH/4; j++)
 			dest[j] = src[j*4];
 	}
+#else
+#endif
 }
 
 
@@ -508,6 +534,7 @@ void R_VideoErase (uint32_t ofs, int32_t count)
 { 
 	int32_t		i;
 	byte	*src, *dest;
+#ifdef __DJGPP__
 	outp (SC_INDEX, SC_MAPMASK);
 	outp (SC_INDEX+1, 15);
 	outp (GC_INDEX, GC_MODE);
@@ -520,6 +547,13 @@ void R_VideoErase (uint32_t ofs, int32_t count)
 	}
 	outp (GC_INDEX, GC_MODE);
 	outp (GC_INDEX+1, inp (GC_INDEX+1)&~1);
+#else
+	src = (byte*)(screen + 0xc000 + (ofs>>2));
+	dest = destscreen+(ofs>>2);
+	for (int i = 0; i < 4; i++) {
+		memcpy (dest, src, count);
+	}
+#endif
 }
 
 

@@ -68,14 +68,6 @@ asm								\
 
 #define mkdir(x) mkdir(x,0)
 
-//DJGPP doesn't inline inp, outp and outpw,
-//but it does inline inportb, outportb and outportw
-#define inp(port) 0
-#define outp(port,data)
-#define outpw(port,data)
-
-#define __djgpp_conventional_base 0
-
 static char* strupr(char* s)
 {
     char* tmp = s;
