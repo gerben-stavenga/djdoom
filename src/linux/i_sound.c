@@ -19,8 +19,6 @@
 // I_SOUND.C
 
 #include "../doomdef.h"
-#include "a_tsmapi.h"
-
 #include "../dmx.h"
 #include "../sounds.h"
 
@@ -45,23 +43,11 @@ static void I_StartupTimer (void)
 
 	printf("I_StartupTimer()\n");
 
-#if defined NOTIMER
 	I_InitBaseTime();
-#else
-	// installs master timer.  Must be done before StartupTimer()!
-	TSM_Install(SND_TICRATE);
-	tsm_ID = TSM_NewService (I_TimerISR, TICRATE, 0, 0); // max priority
-	if (tsm_ID == -1)
-	{
-		I_Error("Can't register 35 Hz timer w/ DMX library");
-	}
-#endif
 }
 
 void I_ShutdownTimer (void)
 {
-	TSM_DelService(tsm_ID);
-	TSM_Remove();
 }
 
 /*

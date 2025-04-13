@@ -17,8 +17,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 //
 
-#include "../common.h"
-#include "dmx.h"
+#include "../id_heads.h"
+#include "../dmx.h"
 #include "a_al_mid.h"
 #include "a_blast.h"
 #include "a_mpu401.h"

@@ -32,7 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <dos.h>
 #include <conio.h>
-#include "../common.h"
+#include "../id_heads.h"
 #include "a_dma.h"
 
 #define DMA_MaxChannel 7

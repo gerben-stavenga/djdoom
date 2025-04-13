@@ -21,7 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef __AL_MIDI_H
 #define __AL_MIDI_H
 
-#include "../common.h"
+#include "../id_heads.h"
 
 void AL_Shutdown(void);
 void AL_Init(void);

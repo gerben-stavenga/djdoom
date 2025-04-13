@@ -228,7 +228,12 @@ void V_DrawPatchDirect (int32_t x, int32_t y, patch_t *patch)
 	w = SHORT(patch->width);
 	for ( col = 0 ; col<w ; col++)
 	{
+#ifdef __DJGPP__
+		uint32_t plane = 0;
 		outp (SC_INDEX+1,1<<(x&3));
+#else
+		uint32_t plane = (x&3) << 16;
+#endif
 		column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
 
 // step through the posts in a column
@@ -236,7 +241,7 @@ void V_DrawPatchDirect (int32_t x, int32_t y, patch_t *patch)
 		while (column->topdelta != 0xff )
 		{
 			source = (byte *)column + 3;
-			dest = desttop + column->topdelta*SCREENWIDTH/4;
+			dest = desttop + column->topdelta*SCREENWIDTH/4 + plane;
 			count = column->length;
 			
 			while (count--)
@@ -244,8 +249,7 @@ void V_DrawPatchDirect (int32_t x, int32_t y, patch_t *patch)
 				*dest = *source++;
 				dest += SCREENWIDTH/4;
 			}
-			column = (column_t *)(  (byte *)column + column->length
-+ 4 );
+			column = (column_t *)(  (byte *)column + column->length + 4 );
 		}
 		if ( ((++x)&3) == 0 )
 			desttop++;	// go to next byte, not next plane
