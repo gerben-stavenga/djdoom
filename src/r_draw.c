@@ -320,8 +320,8 @@ void R_DrawSpan (void)
 
 		uint32_t plane = (ds_x1 + i) & 3;
 		outp (SC_INDEX + 1, 1 << plane);
-		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1;
-		call_dest = (char*)&R_ScaleRowAsm - 19 * ((countp & 31) + 1);
+		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp + 1);
+		call_dest = (char*)&R_ScaleRowAsm - 19 * (countp + 1);
 
 		dfrac <<= 2;
 		fixed_t frac2 = frac;
