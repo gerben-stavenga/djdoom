@@ -125,7 +125,8 @@ static void R_InstallSpriteLump (int32_t lump, uint32_t frame, uint32_t rotation
 = Pass a null terminated list of sprite names (4 chars exactly) to be used
 = Builds the sprite rotation matrixes to account for horizontally flipped
 = sprites.  Will report an error if the lumps are inconsistant
-=Only called at startup
+=
+Only called at startup
 =
 = Sprite lump names are 4 characters for the actor, a letter for the frame,
 = and a number for the rotation, A sprite that is flippable will have an
@@ -226,7 +227,7 @@ static void R_InitSpriteDefs (void)
 
 ===============================================================================
 */
-#define	MAXVISSPRITES	128
+#define	MAXVISSPRITES	256
 
 static int32_t		num_vissprite;
 static vissprite_t	vissprites[MAXVISSPRITES];

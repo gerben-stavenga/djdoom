@@ -20,7 +20,7 @@
 
 #include <assert.h>
 
-#include "doomdef.h"
+#include "../doomdef.h"
 
 /*
 ==============================================================================
@@ -39,6 +39,15 @@ automatically if needed
 */
 
 #define	ZONEID	0x1d4a11
+
+typedef struct memblock_s
+{
+	int32_t                     size;           // including the header and possibly tiny fragments
+	void            **user;         // NULL if a free block
+	int32_t                     tag;            // purgelevel
+	int32_t                     id;                     // should be ZONEID
+	struct memblock_s       *next, *prev;
+} memblock_t;
 
 typedef struct
 {
@@ -277,11 +286,14 @@ void Z_CheckHeap (void)
 ========================
 */
 
-void Z_ChangeTag2 (void *ptr, int32_t tag)
+void Z_ChangeTag2 (void *ptr, int32_t tag, const char* file, int line)
 {
+
 	memblock_t	*block;
 	
 	block = (memblock_t *) ( (byte *)ptr - sizeof(memblock_t));
+	if (block->id != ZONEID)
+		I_Error("Z_CT at %s:%i", file, line);
 	if (block->id != ZONEID)
 		I_Error ("Z_ChangeTag: freed a pointer without ZONEID");
 	if (tag >= PU_PURGELEVEL && (uint32_t)block->user < 0x100)

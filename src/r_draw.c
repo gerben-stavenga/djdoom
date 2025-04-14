@@ -526,6 +526,13 @@ void R_FillBackScreen (void)
 			dest[j] = src[j*4];
 	}
 #else
+	dest = 0xc000 + screen;
+	src = screens[1];
+	for (i = 0; i < 4; i++, src++)
+	{
+		for (j = 0; j < (SCREENHEIGHT-SBARHEIGHT)*SCREENWIDTH/4; j++)
+			dest[j + (i << 16)] = src[j*4];
+	}
 #endif
 }
 

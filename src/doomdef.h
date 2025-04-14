@@ -780,24 +780,10 @@ void 	*Z_Malloc (int32_t size, int32_t tag, void *ptr);
 void 	Z_Free (void *ptr);
 void 	Z_FreeTags (int32_t lowtag, int32_t hightag);
 void	Z_CheckHeap (void);
-void	Z_ChangeTag2 (void *ptr, int32_t tag);
+void	Z_ChangeTag2 (void *ptr, int32_t tag, const char* file, int line);
 
 
-typedef struct memblock_s
-{
-	int32_t                     size;           // including the header and possibly tiny fragments
-	void            **user;         // NULL if a free block
-	int32_t                     tag;            // purgelevel
-	int32_t                     id;                     // should be ZONEID
-	struct memblock_s       *next, *prev;
-} memblock_t;
-
-#define Z_ChangeTag(p,t) \
-{ \
-if (( (memblock_t *)( (byte *)(p) - sizeof(memblock_t)))->id!=0x1d4a11) \
-	I_Error("Z_CT at "__FILE__":%i",__LINE__); \
-Z_ChangeTag2(p,t); \
-};
+#define Z_ChangeTag(p,t) Z_ChangeTag2(p,t, __FILE__, __LINE__)
 
 //-------
 //WADFILE

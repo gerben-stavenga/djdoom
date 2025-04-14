@@ -283,7 +283,7 @@ void I_SetPalette (byte *palette)
 		uint32_t red = gammatable[usegamma][*palette++];
 		uint32_t green = gammatable[usegamma][*palette++];
 		uint32_t blue = gammatable[usegamma][*palette++];
-		color_palette[i] = (red << 16) | (green << 8) | blue | (0xff << 24);
+		color_palette[i] = (red << 16) | (green << 8) | blue | (0xffu << 24);
 	}
 }
 
@@ -385,11 +385,10 @@ void I_UpdateNoBlit(void)
 	memcpy (voldupdatebox, oldupdatebox, sizeof(oldupdatebox));
 	memcpy (oldupdatebox, dirtybox, sizeof(dirtybox));
 
-	if (updatebox[BOXTOP] >= updatebox[BOXBOTTOM]) {
+	if (updatebox[BOXTOP] >= updatebox[BOXBOTTOM])
 		I_UpdateBox (updatebox[BOXLEFT], updatebox[BOXBOTTOM],
 			updatebox[BOXRIGHT] - updatebox[BOXLEFT] + 1,
 			updatebox[BOXTOP] - updatebox[BOXBOTTOM] + 1);
-	}
 	M_ClearBox (dirtybox);
 }
 
@@ -466,7 +465,7 @@ void I_InitGraphics (void)
 	grmode = true;
 	screen = malloc((1<<16) * 4);
 	currentscreen = screen;
-	destscreen = screen + 0xa4000;
+	destscreen = screen + 0x4000;
 	I_SetPalette (W_CacheLumpName("PLAYPAL", PU_CACHE));
 	I_InitDiskFlash ();
 
@@ -1134,19 +1133,17 @@ static void I_Shutdown (void)
 
 void I_Error (char *error, ...)
 {
-#ifndef __DJGPP__
-	assert(0);
-#else
 	va_list argptr;
+#ifdef __DJGPP__
 
 	D_QuitNetGame ();
 	I_Shutdown ();
+#endif
 	va_start (argptr,error);
 	vprintf (error,argptr);
 	va_end (argptr);
 	printf ("\n");
 	exit (1);
-#endif
 }
 
 /*

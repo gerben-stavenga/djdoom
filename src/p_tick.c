@@ -18,6 +18,8 @@
 
 // P_tick.c
 
+#include <assert.h>
+
 #include "doomdef.h"
 #include "p_local.h"
 
@@ -649,8 +651,11 @@ static void P_RunThinkers (void)
 	thinker_t	*currentthinker;
 
 	currentthinker = thinkercap.next;
+	assert(((uint32_t)currentthinker & 3) == 0);
 	while (currentthinker != &thinkercap)
 	{
+		assert(((uint32_t)currentthinker & 3) == 0);
+		thinker_t *nextthinker = currentthinker->next;
 		if (currentthinker->function == (think_t)-1)
 		{	// time to remove it
 			currentthinker->next->prev = currentthinker->prev;
@@ -662,7 +667,7 @@ static void P_RunThinkers (void)
 			if (currentthinker->function)
 				currentthinker->function (currentthinker);
 		}
-		currentthinker = currentthinker->next;
+		currentthinker = nextthinker;
 	}
 }
 

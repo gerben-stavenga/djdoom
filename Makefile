@@ -1,7 +1,7 @@
 CC := gcc
-CFLAGS := -O2 -m32 -fomit-frame-pointer -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fno-pic -no-pie
-
-DBGFLAGS := -g -DRANGECHACK
+CXX := g++
+DBGFLAGS := -g -DRANGECHECK
+CFLAGS := -m32 -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fno-pic -no-pie $(DBGFLAGS) -fsanitize=address
 COBJFLAGS := $(CFLAGS) -c
 AS := nasm
 
@@ -11,6 +11,7 @@ LINUX_BUILD_DIR := build_linux
 
 define get-objects-from-dir
 $(patsubst $(1)/%.c,$(1)/%.o,$(wildcard $(1)/*.c)) \
+$(patsubst $(1)/%.cpp,$(1)/%.o,$(wildcard $(1)/*.cpp)) \
 $(patsubst $(1)/%.asm,$(1)/%.o,$(wildcard $(1)/*.asm))
 endef
 
@@ -56,7 +57,11 @@ $(1)/%.d: %.asm | $(1)/%.dir
 	@touch $$@
 
 $(1)/%.o: %.c $(1)/%.d
+	@echo "Compiling $$<"
 	@$(CC) $(COBJFLAGS) -o $$@ $$<
+
+$(1)/%.o: %.cpp
+	@$(CXX) $(COBJFLAGS) -o $$@ $$<
 
 $(1)/%.s: %.c $(1)/%.d
 	@$(CC) $(COBJFLAGS) -S -o $$@ $$<
@@ -76,7 +81,7 @@ $(DOS_BUILD_DIR)/doom.exe: $(ALL_DOS_OBJS)
 	$(CC) -o $@ $^ $(CFLAGS)
 
 $(LINUX_BUILD_DIR)/doom: $(ALL_LINUX_OBJS)
-	$(CC) -o $@ $^ $(CFLAGS) -lX11
+	$(CXX) -o $@ $^ $(CFLAGS) -lX11
 
 
 .PHONY: debug
