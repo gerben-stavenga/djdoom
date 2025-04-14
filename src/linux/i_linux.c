@@ -603,7 +603,7 @@ void I_ReadScreen (byte *scr)
 	for (p = 0; p < 4; p++)
 	{
 		for (i = 0; i < SCREENWIDTH*SCREENHEIGHT/4; i++)
-			scr[i*4+p] = currentscreen[i] + (p << 16);
+			scr[i*4+p] = currentscreen[i + (p << 16)];
 	}
 }
 

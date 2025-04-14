@@ -558,7 +558,8 @@ void R_VideoErase (uint32_t ofs, int32_t count)
 	src = (byte*)(screen + 0xc000 + (ofs>>2));
 	dest = destscreen+(ofs>>2);
 	for (int i = 0; i < 4; i++) {
-		memcpy (dest, src, count);
+		
+		memcpy (dest + (i << 16), src + (i << 16), count >> 2);
 	}
 #endif
 }

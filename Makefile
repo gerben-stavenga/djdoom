@@ -1,7 +1,7 @@
 CC := gcc
 CXX := g++
 DBGFLAGS := -g -DRANGECHECK
-CFLAGS := -m32 -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fno-pic -no-pie $(DBGFLAGS) -fsanitize=address
+CFLAGS := -O2 -m32 -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fno-pic -no-pie $(DBGFLAGS) # -fsanitize=address
 COBJFLAGS := $(CFLAGS) -c
 AS := nasm
 
@@ -35,8 +35,10 @@ esac
 endef
 export depend = $(value _depend)
 
+Z_ZONE_OBJ = $(SRC_DIR)/z_zone/z_zone.o
+
 # Find all .o files
-DOOM_OBJS := $(call get-objects-from-dir,$(SRC_DIR))
+DOOM_OBJS := $(call get-objects-from-dir,$(SRC_DIR)) $(Z_ZONE_OBJ)
 DOS_OBJS := $(call get-objects-from-dir,$(SRC_DIR)/dos)
 LINUX_OBJS := $(call get-objects-from-dir,$(SRC_DIR)/linux)
 
@@ -60,7 +62,7 @@ $(1)/%.o: %.c $(1)/%.d
 	@echo "Compiling $$<"
 	@$(CC) $(COBJFLAGS) -o $$@ $$<
 
-$(1)/%.o: %.cpp
+$(1)/%.o: %.cpp | $(1)/%.dir
 	@$(CXX) $(COBJFLAGS) -o $$@ $$<
 
 $(1)/%.s: %.c $(1)/%.d
@@ -78,7 +80,7 @@ $(eval $(call make-rules, $(LINUX_BUILD_DIR), -f elf))
 
 # Doom targets
 $(DOS_BUILD_DIR)/doom.exe: $(ALL_DOS_OBJS)
-	$(CC) -o $@ $^ $(CFLAGS)
+	$(CXX) -o $@ $^ $(CFLAGS)
 
 $(LINUX_BUILD_DIR)/doom: $(ALL_LINUX_OBJS)
 	$(CXX) -o $@ $^ $(CFLAGS) -lX11
