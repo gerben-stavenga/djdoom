@@ -142,10 +142,11 @@ typedef struct
 typedef struct
 {
 	char		name[8];
-	boolean		masked;	
+	int16_t		masked;
+	int16_t		masked2;
 	int16_t		width;
 	int16_t		height;
-	void		**columndirectory;	// OBSOLETE
+	char		columndirectory[4];	// OBSOLETE
 	int16_t		patchcount;
 	mappatch_t	patches[1];
 } maptexture_t;

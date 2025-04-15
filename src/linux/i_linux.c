@@ -1133,6 +1133,7 @@ static void I_Shutdown (void)
 
 void I_Error (char *error, ...)
 {
+	assert(0);
 	va_list argptr;
 #ifdef __DJGPP__
 
@@ -1143,6 +1144,7 @@ void I_Error (char *error, ...)
 	vprintf (error,argptr);
 	va_end (argptr);
 	printf ("\n");
+	assert(0);
 	exit (1);
 }
 

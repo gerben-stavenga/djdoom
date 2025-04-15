@@ -64,9 +64,6 @@ void Z_Free (void *ptr) {
 		I_Error("Z_Free: pointer not found in memory_map");
 	}
 	ptrs.erase(ptr_it);
-	if (ptrs.empty()) {
-		memory_map.erase(it);
-	}
 	std::free(ptr);
 }
 
@@ -105,10 +102,10 @@ void Z_FreeTags (int32_t lowtag, int32_t hightag)
 {
 	for (auto it = memory_map.begin(); it != memory_map.end(); ++it) {
 		if (it->first >= lowtag && it->first <= hightag) {
-			for (auto ptr : it->second) {
+			auto copied = it->second;
+			for (auto ptr : copied) {
 				Z_Free(ptr);
 			}
-			it->second.clear();
 		}
 	}
 }

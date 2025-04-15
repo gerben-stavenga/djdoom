@@ -82,10 +82,13 @@ void Z_Init (void)
 		(memblock_t *)( (byte *)mainzone + sizeof(memzone_t) );
 	mainzone->blocklist.user = (void *)mainzone;
 	mainzone->blocklist.tag = PU_STATIC;
+	mainzone->blocklist.id = ZONEID;
 	mainzone->rover = block;
 	
 	block->prev = block->next = &mainzone->blocklist;
 	block->user = NULL;	// free block
+	block->tag = 0;
+	block->id = ZONEID;
 	block->size = mainzone->size - sizeof(memzone_t);
 }
 
@@ -243,10 +246,10 @@ void Z_FreeTags (int32_t lowtag, int32_t hightag)
 	for (block = mainzone->blocklist.next ; block != &mainzone->blocklist 
 	; block = next)
 	{
-		assert(block->id == ZONEID);
 		next = block->next;		// get link before freeing
 		if (!block->user)
 			continue;			// free block
+		if (block->id != ZONEID) I_Error ("Z_FreeTags: freed a pointer without ZONEID %x\n", block->id);
 		if (block->tag >= lowtag && block->tag <= hightag)
 			Z_Free ( (byte *)block+sizeof(memblock_t));
 	}

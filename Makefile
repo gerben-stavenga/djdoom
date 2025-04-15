@@ -1,7 +1,7 @@
 CC := gcc
 CXX := g++
 DBGFLAGS := -g -DRANGECHECK
-CFLAGS := -O2 -m32 -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fno-pic -no-pie $(DBGFLAGS) # -fsanitize=address
+CFLAGS := -O2 -m32 -Wno-attributes -Wno-unused-result -DAPPVER_EXEDEF=DM19F2 -fomit-frame-pointer -fno-pic -no-pie # $(DBGFLAGS) -fsanitize=address -fsanitize=undefined
 COBJFLAGS := $(CFLAGS) -c
 AS := nasm
 
@@ -11,7 +11,6 @@ LINUX_BUILD_DIR := build_linux
 
 define get-objects-from-dir
 $(patsubst $(1)/%.c,$(1)/%.o,$(wildcard $(1)/*.c)) \
-$(patsubst $(1)/%.cpp,$(1)/%.o,$(wildcard $(1)/*.cpp)) \
 $(patsubst $(1)/%.asm,$(1)/%.o,$(wildcard $(1)/*.asm))
 endef
 
@@ -35,6 +34,7 @@ esac
 endef
 export depend = $(value _depend)
 
+# Z_ZONE_OBJ = $(SRC_DIR)/z_zone/z_zone_asan.o
 Z_ZONE_OBJ = $(SRC_DIR)/z_zone/z_zone.o
 
 # Find all .o files
