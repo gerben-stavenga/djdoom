@@ -1,3 +1,7 @@
 .vscode
 build_dos
 build_linux
+build_mode13
+build_vbe_banked
+build_vbe_lfb
+build_tests

@@ -28,6 +28,7 @@
 
 #include "../doomdef.h"
 #include "../r_local.h"
+#include "../i_video.h"
 
 #define DPMI_INT 0x31
 #define NOTIMER
@@ -297,6 +298,14 @@ void I_SetPalette (byte *palette)
 
 byte *screen, *currentscreen;
 byte *destscreen;
+video_mode_t video_mode = VIDEO_VGA;
+unsigned video_pitch = PLANEWIDTH;
+drawbuffer_t I_GetDrawBuffer(void)
+{
+    drawbuffer_t buffer = { destscreen, PLANEWIDTH };
+    return buffer;
+}
+
 byte *destview	__attribute__ ((externally_visible));
 
 /*
@@ -309,44 +318,7 @@ byte *destview	__attribute__ ((externally_visible));
 
 static void I_UpdateBox (int32_t x, int32_t y, int32_t width, int32_t height)
 {
-	int32_t		ofs;
-	byte	*source;
-	int16_t	*dest;
-	int32_t		p,x1, x2;
-	int32_t		srcdelta, destdelta;
-	int32_t		wwide;
-
-#ifdef RANGECHECK
-	if (x < 0 || y < 0 || width <= 0 || height <= 0
-		|| x + width > SCREENWIDTH || y + height > SCREENHEIGHT)
-	{
-		I_Error("Bad I_UpdateBox (%i, %i, %i, %i)", x, y, width, height);
-	}
-#endif
-
-	x1 = x>>3;
-	x2 = (x+width)>>3;
-	wwide = x2-x1+1;
-
-	ofs = y*SCREENWIDTH+(x1<<3);
-	srcdelta = SCREENWIDTH - (wwide<<3);
-	destdelta = PLANEWIDTH/2 - wwide;
-
-	for (p = 0 ; p < 4 ; p++)
-	{
-		source = screens[0] + ofs + p;
-		dest = (int16_t *)(destscreen + (ofs>>2) + (p << 16));
-		for (y=0 ; y<height ; y++)
-		{
-			for (x=wwide ; x ; x--)
-			{
-				*dest++ = *source + (source[4]<<8);
-				source += 8;
-			}
-			source+=srcdelta;
-			dest+=destdelta;
-		}
-	}
+    I_BlitRect(screens[0], SCREENWIDTH, x, y, width, height);
 }
 
 /*

@@ -32,7 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <dos.h>
 #include <time.h>
-#include "../id_heads.h"
+#include "common.h"
 #include "../dmx.h"
 #include "a_blast.h"
 #include "a_dma.h"
@@ -1047,6 +1047,7 @@ static int32_t MV_TestPlayback(void)
 			status = MV_Ok;
 			break;
 		}
+
 	}
 
 	RestoreInterrupts(flags);

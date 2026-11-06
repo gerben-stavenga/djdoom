@@ -353,6 +353,7 @@ extern	fixed_t		*spritewidth;		// needed for pre rendering (fracs)
 extern	fixed_t		*spriteoffset;
 extern	fixed_t		*spritetopoffset;
 extern	lighttable_t	*colormaps;
+extern unsigned colormap_count;
 extern	int32_t		viewwidth, scaledviewwidth, viewheight;
 extern	int32_t			firstflat;
 //extern	int32_t			numflats;
@@ -408,7 +409,6 @@ extern	byte			*dc_source;		// first pixel in a column
 void 	R_DrawColumn (void);
 void 	R_DrawColumnLow (void);
 void 	R_DrawFuzzColumn (void);
-void	R_DrawTranslatedColumn (void);
 
 extern	int32_t			ds_y;
 extern	int32_t			ds_x1;
@@ -420,14 +420,13 @@ extern	fixed_t			ds_xstep;
 extern	fixed_t			ds_ystep;
 extern	byte			*ds_source;		// start of a 64*64 tile image
 
-extern	byte	*translationtables;
-extern	byte	*dc_translation;
 
 void 	R_DrawSpan (void);
 void 	R_DrawSpanLow (void);
 
 void 	R_InitBuffer (int32_t width, int32_t height);
-void	R_InitTranslationTables (void);
+void R_InitTranslatedColormaps(void);
+lighttable_t *R_TranslatedColormap(lighttable_t *map, unsigned translation);
 void R_FillBackScreen (void);
 void	R_VideoErase (uint32_t ofs, int32_t count);
 void R_DrawViewBorder (void);

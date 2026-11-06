@@ -21,8 +21,11 @@
 #include <conio.h>
 #include <dos.h>
 #include <stdarg.h>
+
+#include "compiler.h"
 #include "../doomdef.h"
 #include "../r_local.h"
+#include "../i_video.h"
 
 #define DPMI_INT 0x31
 //#define NOTIMER
@@ -36,6 +39,7 @@ static void DPMIInt (int32_t i);
 
 static void I_ReadMouse (void);
 static void I_InitDiskFlash (void);
+static void I_VBE_SetPalette(byte *palette);
 
 extern  int32_t     usemouse, usejoystick;
 
@@ -275,6 +279,10 @@ void I_WaitVBL (int32_t vbls)
 
 void I_SetPalette (byte *palette)
 {
+    if (I_VbePixels()) {
+        if (!novideo) I_VBE_SetPalette(palette);
+        return;
+    }
 	int32_t	i;
 
 	if (novideo)
@@ -296,8 +304,39 @@ void I_SetPalette (byte *palette)
 
 byte *screen;
 static byte *currentscreen;
+static byte *framebuffer;
+static byte disk_icon[16 * 16], disk_backup[16 * 16];
+static unsigned draw_page = 1, visible_page, current_page;
+video_mode_t video_mode = VIDEO_VGA;
+unsigned video_pitch = PLANEWIDTH;
+static int vbe_linear;
 byte *destscreen;
 byte *destview	__attribute__ ((externally_visible));
+
+#include "i_vbe.h"
+
+drawbuffer_t I_GetDrawBuffer(void)
+{
+    drawbuffer_t buffer;
+    if (I_VbePixels()) {
+        buffer.pixels = I_VBE_SelectPage(vbe_draw_page);
+        buffer.pitch = vbe_pitch;
+    } else if (video_mode == VIDEO_MCGA) {
+        buffer.pixels = framebuffer;
+        buffer.pitch = SCREENWIDTH;
+    } else {
+        buffer.pixels = screen + 0x4000 * draw_page;
+        buffer.pitch = PLANEWIDTH;
+    }
+    return buffer;
+}
+
+static void I_SelectDrawBuffer(void)
+{
+    drawbuffer_t buffer = I_GetDrawBuffer();
+    destscreen = buffer.pixels;
+    video_pitch = buffer.pitch;
+}
 
 /*
 ===================
@@ -309,46 +348,8 @@ byte *destview	__attribute__ ((externally_visible));
 
 static void I_UpdateBox (int32_t x, int32_t y, int32_t width, int32_t height)
 {
-	int32_t		ofs;
-	byte	*source;
-	int16_t	*dest;
-	int32_t		p,x1, x2;
-	int32_t		srcdelta, destdelta;
-	int32_t		wwide;
-
-#ifdef RANGECHECK
-	if (x < 0 || y < 0 || width <= 0 || height <= 0
-		|| x + width > SCREENWIDTH || y + height > SCREENHEIGHT)
-	{
-		I_Error("Bad I_UpdateBox (%i, %i, %i, %i)", x, y, width, height);
-	}
-#endif
-
-	x1 = x>>3;
-	x2 = (x+width)>>3;
-	wwide = x2-x1+1;
-
-	ofs = y*SCREENWIDTH+(x1<<3);
-	srcdelta = SCREENWIDTH - (wwide<<3);
-	destdelta = PLANEWIDTH/2 - wwide;
-	outp (SC_INDEX, SC_MAPMASK);
-
-	for (p = 0 ; p < 4 ; p++)
-	{
-		outp (SC_INDEX+1, 1<<p);
-		source = screens[0] + ofs + p;
-		dest = (int16_t *)(destscreen + (ofs>>2));
-		for (y=0 ; y<height ; y++)
-		{
-			for (x=wwide ; x ; x--)
-			{
-				*dest++ = *source + (source[4]<<8);
-				source += 8;
-			}
-			source+=srcdelta;
-			dest+=destdelta;
-		}
-	}
+    if (novideo) return;
+    I_BlitRect(screens[0], SCREENWIDTH, x, y, width, height);
 }
 
 /*
@@ -365,7 +366,9 @@ void I_UpdateNoBlit(void)
 	static int32_t voldupdatebox[4];
 	int32_t updatebox[4];
 
-	currentscreen = destscreen;
+    I_SelectDrawBuffer();
+    currentscreen = destscreen;
+    current_page = I_VbePixels() ? vbe_draw_page : draw_page;
 	updatebox[BOXTOP] = (dirtybox[BOXTOP] > voldupdatebox[BOXTOP]) ?
 		dirtybox[BOXTOP] : voldupdatebox[BOXTOP];
 	updatebox[BOXRIGHT] = (dirtybox[BOXRIGHT] > voldupdatebox[BOXRIGHT]) ?
@@ -405,30 +408,27 @@ void I_UpdateNoBlit(void)
 
 void I_FinishUpdate (void)
 {
-	static	int32_t		lasttic;
-	int32_t				tics, i;
-
-	// draws little dots on the bottom of the screen
-	if (devparm)
-	{
-		tics = I_GetTime() - lasttic;
-		lasttic = I_GetTime();
-		if (tics > 20) tics = 20;
-
-		outpw (SC_INDEX, SC_MAPMASK | (1 << 8));
-
-		for (i=0 ; i<tics ; i++)
-			destscreen[ (SCREENHEIGHT-1)*PLANEWIDTH + i] = 0xff;
-		for ( ; i<20 ; i++)
-			destscreen[ (SCREENHEIGHT-1)*PLANEWIDTH + i] = 0x0;
-	}
-
-	// page flip
-	outpw (CRTC_INDEX, CRTC_STARTHIGH+((int32_t)destscreen&0xff00));
-
-	destscreen += 0x4000;
-	if ( (int32_t)destscreen == (int32_t)(0xac000 + __djgpp_conventional_base))
-		destscreen = (byte *)(0xa0000 + __djgpp_conventional_base);
+    if (novideo) return;
+    if (devparm) {
+        static int32_t lasttic;
+        byte dots[SCREENWIDTH] = {0};
+        int32_t now = I_GetTime(), tics = now - lasttic;
+        lasttic = now;
+        if (tics > 20) tics = 20;
+        if (tics < 0) tics = 0;
+        memset(dots, 255, tics * 4);
+        /* One-row source; the destination is the last screen row. */
+        for (unsigned x = 0; x < SCREENWIDTH; x++)
+            *I_ColumnAddress(destscreen, x, SCREENHEIGHT - 1, 0) = dots[x];
+    }
+    if (I_VbePixels()) I_VBE_Flip();
+    else if (video_mode == VIDEO_MCGA) memcpy(screen, destscreen, SCREENWIDTH * SCREENHEIGHT);
+    else {
+        outpw(CRTC_INDEX, CRTC_STARTHIGH | ((draw_page * 0x4000) & 0xff00));
+        visible_page = draw_page;
+        draw_page = (draw_page + 1) % 3;
+    }
+    I_SelectDrawBuffer();
 }
 
 /*
@@ -441,29 +441,46 @@ void I_FinishUpdate (void)
 
 void I_InitGraphics (void)
 {
-	if (novideo)
-		return;
-	grmode = true;
-	regs.h.ah = 0;
-	regs.h.al = 0x13;
-	int386 (0x10, &regs, &regs);
-	screen = currentscreen = (byte *)(0xa0000 + __djgpp_conventional_base);
-	destscreen = (byte *)(0xa4000 + __djgpp_conventional_base);
-	outp (SC_INDEX,SC_MEMMODE);
-	outp (SC_INDEX+1,(inp(SC_INDEX+1)&~8)|4);
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~0x13);
-	outp (GC_INDEX,GC_MISCELLANEOUS);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~2);
-	outpw (SC_INDEX,SC_MAPMASK|(15<<8));
-	memset (screen, 0, 65536);
-	outp (CRTC_INDEX,CRTC_UNDERLINE);
-	outp (CRTC_INDEX+1,inp(CRTC_INDEX+1)&~0x40);
-	outp (CRTC_INDEX,CRTC_MODE);
-	outp (CRTC_INDEX+1,inp(CRTC_INDEX+1)|0x40);
-	outp (GC_INDEX,GC_READMAP);
-	I_SetPalette (W_CacheLumpName("PLAYPAL", PU_CACHE));
-	I_InitDiskFlash ();
+    if (novideo) return;
+    char *flags[] = {"-vga", "-mcga", "-vbe1", "-vbe2"};
+    const char *labels[] = {"VGA Mode Y", "MCGA", "VBE banked", "VBE linear framebuffer"};
+    int last = 0;
+    for (unsigned i = 0; i < 4; i++) {
+        int position = M_CheckParm(flags[i]);
+        if (position > last) { video_mode = (video_mode_t)i; last = position; }
+    }
+    printf("Video: %s\n", labels[video_mode]);
+    vbe_linear = video_mode == VIDEO_VBE2;
+    if (I_VbePixels()) I_VBE_Init();
+    else {
+        regs.h.ah = 0;
+        regs.h.al = 0x13;
+        int386(0x10, &regs, &regs);
+        screen = (byte *)(0xa0000 + __djgpp_conventional_base);
+        if (I_PlanarPixels()) {
+            outp(SC_INDEX, SC_MEMMODE);
+            outp(SC_INDEX + 1, (inp(SC_INDEX + 1) & ~8) | 4);
+            outp(GC_INDEX, GC_MODE);
+            outp(GC_INDEX + 1, inp(GC_INDEX + 1) & ~0x13);
+            outp(GC_INDEX, GC_MISCELLANEOUS);
+            outp(GC_INDEX + 1, inp(GC_INDEX + 1) & ~2);
+            outpw(SC_INDEX, SC_MAPMASK | (15 << 8));
+            memset(screen, 0, 65536);
+            outp(CRTC_INDEX, CRTC_UNDERLINE);
+            outp(CRTC_INDEX + 1, inp(CRTC_INDEX + 1) & ~0x40);
+            outp(CRTC_INDEX, CRTC_MODE);
+            outp(CRTC_INDEX + 1, inp(CRTC_INDEX + 1) | 0x40);
+        } else {
+            framebuffer = Z_Malloc(SCREENWIDTH * SCREENHEIGHT, PU_STATIC, 0);
+            memset(framebuffer, 0, SCREENWIDTH * SCREENHEIGHT);
+        }
+    }
+    grmode = true;
+    I_SelectDrawBuffer();
+    currentscreen = destscreen;
+    current_page = I_VbePixels() ? vbe_draw_page : draw_page;
+    I_SetPalette(W_CacheLumpName("PLAYPAL", PU_CACHE));
+    I_InitDiskFlash();
 }
 
 /*
@@ -476,12 +493,16 @@ void I_InitGraphics (void)
 
 static void I_ShutdownGraphics (void)
 {
-	if (*(byte *)(0x449 + __djgpp_conventional_base) == 0x13) // don't reset mode if it didn't get set
-	{
-		regs.h.ah = 0;
-		regs.h.al = 3;
-		int386 (0x10, &regs, &regs); // back to text mode
-	}
+    if (grmode) {
+        regs.h.ah = 0;
+        regs.h.al = 3;
+        int386(0x10, &regs, &regs);
+        grmode = false;
+    }
+    if (vbe_mapping.size) {
+        __dpmi_free_physical_address_mapping(&vbe_mapping);
+        vbe_mapping.size = 0;
+    }
 }
 
 /*
@@ -496,14 +517,20 @@ static void I_ShutdownGraphics (void)
 
 void I_ReadScreen (byte *scr)
 {
-	int32_t	p, i;
-	outp (GC_INDEX,GC_READMAP);
-	for (p = 0; p < 4; p++)
-	{
-		outp (GC_INDEX+1,p);
-		for (i = 0; i < SCREENWIDTH*SCREENHEIGHT/4; i++)
-			scr[i*4+p] = currentscreen[i];
-	}
+    if (novideo) return;
+    byte *source = I_VbePixels() ? I_VBE_SelectPage(current_page) : currentscreen;
+    if (!I_PlanarPixels()) {
+        for (unsigned y = 0; y < SCREENHEIGHT; y++)
+            memcpy(scr + y * SCREENWIDTH, source + y * video_pitch, SCREENWIDTH);
+    } else {
+        for (unsigned plane = 0; plane < 4; plane++) {
+            I_ReadPlane(plane);
+            for (unsigned y = 0; y < SCREENHEIGHT; y++)
+                for (unsigned x = 0; x < PLANEWIDTH; x++)
+                    scr[y * SCREENWIDTH + x * 4 + plane] = source[y * video_pitch + x];
+        }
+    }
+    I_SelectDrawBuffer();
 }
 
 
@@ -1304,100 +1331,50 @@ byte *I_ZoneBase (int32_t *size)
 
 static void I_InitDiskFlash (void)
 {
-	void    *pic;
-	byte    *temp;
+    patch_t *pic = W_CacheLumpName(M_CheckParm("-cdrom") ? "STCDROM" : "STDISK", PU_CACHE);
+    memset(disk_icon, 0, sizeof(disk_icon));
+    for (int col = 0; col < SHORT(pic->width); col++) {
+        int x = col - SHORT(pic->leftoffset);
+        column_t *column = (column_t *)((byte *)pic + LONG(pic->columnofs[col]));
+        while (column->topdelta != 0xff) {
+            byte *source = (byte *)column + 3;
+            for (int row = 0; row < column->length; row++) {
+                int y = column->topdelta + row - SHORT(pic->topoffset);
+                if ((unsigned)x < 16 && (unsigned)y < 16) disk_icon[y * 16 + x] = source[row];
+            }
+            column = (column_t *)((byte *)column + column->length + 4);
+        }
+    }
+}
 
-	if (M_CheckParm ("-cdrom"))
-		pic = W_CacheLumpName ("STCDROM",PU_CACHE);
-	else
-		pic = W_CacheLumpName ("STDISK",PU_CACHE);
-	temp = destscreen;
-	destscreen = (byte *)(0xac000 + __djgpp_conventional_base);
-	V_DrawPatchDirect (SCREENWIDTH-16,SCREENHEIGHT-16,pic);
-	destscreen = temp;
+static void I_DiskIcon(int show)
+{
+    if (!grmode) return;
+    byte *base = I_VbePixels() ? I_VBE_SelectPage(vbe_visible_page)
+        : video_mode == VIDEO_MCGA ? screen : screen + visible_page * 0x4000;
+    for (unsigned x = 0; x < 16; x++) {
+        I_ReadPlane(304 + x);
+        byte *dest = I_ColumnAddress(base, 304 + x, 184, 0);
+        for (unsigned y = 0; y < 16; y++, dest += video_pitch) {
+            if (show) {
+                disk_backup[y * 16 + x] = *dest;
+                *dest = disk_icon[y * 16 + x];
+            } else *dest = disk_backup[y * 16 + x];
+        }
+    }
+    I_SelectDrawBuffer();
 }
 
 // draw disk icon
 void I_BeginRead (void)
 {
-	byte    *src,*dest;
-	int32_t             y;
-
-	if (!grmode)
-		return;
-
-// write through all planes
-	outp (SC_INDEX,SC_MAPMASK);
-	outp (SC_INDEX+1,15);
-// set write mode 1
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)|1);
-
-// copy to backup
-	src = currentscreen + 184*PLANEWIDTH + 304/4;
-	dest = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 288/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
-	}
-
-// copy disk over
-	dest = currentscreen + 184*PLANEWIDTH + 304/4;
-	src = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 304/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
-	}
-
-
-// set write mode 0
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~1);
+    I_DiskIcon(1);
 }
 
 // erase disk icon
 void I_EndRead (void)
 {
-	byte    *src,*dest;
-	int32_t             y;
-
-	if (!grmode)
-		return;
-
-// write through all planes
-	outp (SC_INDEX,SC_MAPMASK);
-	outp (SC_INDEX+1,15);
-// set write mode 1
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)|1);
-
-
-// copy disk over
-	dest = currentscreen + 184*PLANEWIDTH + 304/4;
-	src = (byte *)(0xac000 + __djgpp_conventional_base + 184*PLANEWIDTH + 288/4);
-	for (y=0 ; y<16 ; y++)
-	{
-		dest[0] = src[0];
-		dest[1] = src[1];
-		dest[2] = src[2];
-		dest[3] = src[3];
-		src += PLANEWIDTH;
-		dest += PLANEWIDTH;
-	}
-
-// set write mode 0
-	outp (GC_INDEX,GC_MODE);
-	outp (GC_INDEX+1,inp(GC_INDEX+1)&~1);
+    I_DiskIcon(0);
 }
 
 

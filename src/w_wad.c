@@ -24,6 +24,32 @@
 
 #include "doomdef.h"
 
+#ifdef __linux__
+
+#include <sys/stat.h>
+#include <ctype.h>
+
+static char* strupr(char* s)
+{
+    char* tmp = s;
+
+    for (;*tmp;++tmp) {
+        *tmp = toupper((unsigned char) *tmp);
+    }
+
+    return s;
+}
+
+static long filelength(int fd)
+{
+	struct stat st;
+	if (fstat(fd, &st) == -1)
+		return -1;
+	return st.st_size;
+}
+
+#endif  // __linux__
+
 #ifndef O_BINARY
     #define O_BINARY 0  /* Define as 0 on platforms where it doesn't exist */
 #endif

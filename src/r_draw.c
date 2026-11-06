@@ -22,12 +22,9 @@
 
 #include "doomdef.h"
 #include "r_local.h"
-
-#define SC_INDEX			0x3c4
-#define SC_MAPMASK			2
-#define GC_INDEX			0x3ce
-#define GC_READMAP			4
-#define GC_MODE				5
+#include "i_video.h"
+#include "r_scalers.h"
+#include "r_colormaps.h"
 
 /*
 
@@ -56,82 +53,36 @@ fixed_t			dc_iscale		__attribute__ ((externally_visible));
 fixed_t			dc_texturemid	__attribute__ ((externally_visible));
 byte			*dc_source		__attribute__ ((externally_visible));		// first pixel in a column (possibly virtual)
 
-extern void R_ScaleColumnAsm() asm ("_R_ScaleColumnAsm");
-extern void R_ScaleRowAsm() asm("_R_ScaleRowAsm");
-
-void* call_dest asm("_call_dest");
-int32_t loop_count asm("_loop_count");
+static void R_DrawColumnShared(int low)
+{
+    int count = dc_yh - dc_yl + 1;
+    if (count <= 0) return;
+#ifdef RANGECHECK
+    if (dc_x < 0 || (dc_x << low) >= scaledviewwidth || dc_yl < 0 || dc_yh >= viewheight)
+        I_Error("Bad column at %i: %i..%i", dc_x, dc_yl, dc_yh);
+#endif
+    byte *dest = I_ColumnAddress(destview, dc_x << low, dc_yl, low);
+    uint32_t frac = (uint32_t)dc_texturemid + (uint32_t)(dc_yl - centery) * dc_iscale;
+    column_scaler_t *scale = I_WordPixels(low) ? R_ScaleColumnWord : R_ScaleColumn;
+    scale(dest, video_pitch, count, dc_source, dc_colormap, frac, dc_iscale);
+    unsigned second = I_SoftwarePlaneOffset(low);
+    if (second)
+        R_ScaleColumn(dest + second, video_pitch, count, dc_source, dc_colormap, frac, dc_iscale);
+}
 
 void R_DrawColumn (void)
 {
-	int32_t		count;
-	byte		*dest;
-	uint32_t		frac, frac2, fracstep;	
-
-	count = dc_yh - dc_yl;
-	if (count < 0)
-		return;
-				
-#ifdef RANGECHECK
-	if ((uint32_t)dc_x >= SCREENWIDTH || dc_yl < 0 || dc_yh >= SCREENHEIGHT)
-		I_Error ("R_DrawColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
-#endif
-
-#ifdef __DJGPP__
-	outp (SC_INDEX+1,1<<(dc_x&3));
-	dest = destview + (dc_yl + (count & 31) + 1)*PLANEWIDTH + (dc_x>>2);
-#else
-	dest = destview + (dc_yl + (count & 31) + 1)*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16);
-#endif
-	
-	fracstep = dc_iscale << 9;
-	frac = frac2 = (dc_texturemid << 9) + (dc_yl-centery)*fracstep;
-
-	loop_count = count >> 5;
-	// add edi, 32 * 80 // 6 bytes
-	// 32 unrolled 17 byte sequence
-	call_dest = (char*)R_ScaleColumnAsm + 6 + 32 * 17 - 17 * ((count & 31) + 1);
-	lighttable_t *colormap = dc_colormap;
-	asm volatile("call *(_call_dest)": "+a"(colormap), "+c"(frac), "+d"(frac2): "D"(dest), "S"(dc_source), "b"(fracstep) : "memory");
+    R_DrawColumnShared(0);
 }
 
 void R_DrawColumnLow (void)
 {
-#ifdef __DJGPP__
-	int32_t		count;
-	byte		*dest;
-	fixed_t		frac, fracstep;	
-
-	count = dc_yh - dc_yl;
-	if (count < 0)
-		return;
-				
-#ifdef RANGECHECK
-	if ((uint32_t)dc_x >= SCREENWIDTH || dc_yl < 0 || dc_yh >= SCREENHEIGHT)
-		I_Error ("R_DrawColumnLow: %i to %i at %i", dc_yl, dc_yh, dc_x);
-#endif
-
-	if (dc_x & 1)
-		outp (SC_INDEX+1,12);
-	else
-		outp (SC_INDEX+1,3);
-	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>1);
-	
-	fracstep = dc_iscale;
-	frac = dc_texturemid + (dc_yl-centery)*fracstep;
-
-	do
-	{
-		*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
-		dest += PLANEWIDTH;
-		frac += fracstep;
-	} while (count--);
-#endif
+    R_DrawColumnShared(1);
 }
 
 
 #define FUZZTABLE	50
-#define FUZZOFF	(PLANEWIDTH)
+#define FUZZOFF 1
 static const int32_t		fuzzoffset[FUZZTABLE] = {
 FUZZOFF,-FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF,FUZZOFF,-FUZZOFF,FUZZOFF
 };
@@ -139,151 +90,50 @@ static int32_t fuzzpos = 0;
 
 void R_DrawFuzzColumn (void)
 {
-	int32_t		count;
-	byte		*dest;
-	fixed_t		frac, fracstep;	
-
-	if (!dc_yl)
-		dc_yl = 1;
-	if (dc_yh == viewheight-1)
-		dc_yh = viewheight - 2;
-		
-	count = dc_yh - dc_yl;
-	if (count < 0)
-		return;
-				
-#ifdef RANGECHECK
-	if ((uint32_t)dc_x >= SCREENWIDTH || dc_yl < 0 || dc_yh >= SCREENHEIGHT)
-		I_Error ("R_DrawFuzzColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
-#endif
-
-#ifdef __DJGPP__
-	if (detailshift)
-	{
-		if (dc_x & 1)
-		{
-			outpw (GC_INDEX,GC_READMAP+(2<<8) ); 
-			outp (SC_INDEX+1,12); 
-		}
-		else
-		{
-			outpw (GC_INDEX,GC_READMAP); 
-			outp (SC_INDEX+1,3); 
-		}
-		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>1); 
-	}
-	else
-	{
-		outpw (GC_INDEX,GC_READMAP+((dc_x&3)<<8) ); 
-		outp (SC_INDEX+1,1<<(dc_x&3)); 
-		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2); 
-	}
-#else
-	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16); 
-#endif
-
-	fracstep = dc_iscale;
-	frac = dc_texturemid + (dc_yl-centery)*fracstep;
-
-	do
-	{
-		*dest = colormaps[6*256+dest[fuzzoffset[fuzzpos]]];
-		if (++fuzzpos == FUZZTABLE)
-			fuzzpos = 0;
-
-		dest += PLANEWIDTH;
-		frac += fracstep;
-	} while (count--);
+    if (!dc_yl) dc_yl = 1;
+    if (dc_yh == viewheight - 1) dc_yh = viewheight - 2;
+    int count = dc_yh - dc_yl + 1;
+    if (count <= 0) return;
+    unsigned x = dc_x << detailshift;
+    I_ReadPlane(x);
+    byte *dest = I_ColumnAddress(destview, x, dc_yl, detailshift);
+    unsigned second = I_SoftwarePlaneOffset(detailshift);
+    while (count--) {
+        byte pixel = colormaps[6 * 256 + dest[fuzzoffset[fuzzpos] * (int)video_pitch]];
+        if (I_WordPixels(detailshift)) *(uint16_t *)dest = pixel * 0x101u;
+        else *dest = pixel;
+        if (second) dest[second] = pixel;
+        if (++fuzzpos == FUZZTABLE) fuzzpos = 0;
+        dest += video_pitch;
+    }
 }
+
+static byte *translated_colormaps;
 
 /*
 ========================
 =
-= R_DrawTranslatedColumn
+= R_InitTranslatedColormaps
 =
 ========================
 */
 
-byte *dc_translation;
-byte *translationtables;
-
-void R_DrawTranslatedColumn (void)
+void R_InitTranslatedColormaps(void)
 {
-	int32_t		count;
-	byte		*dest;
-	fixed_t		frac, fracstep;	
-
-	count = dc_yh - dc_yl;
-	if (count < 0)
-		return;
-				
-#ifdef RANGECHECK
-	if ((uint32_t)dc_x >= SCREENWIDTH || dc_yl < 0 || dc_yh >= SCREENHEIGHT)
-		I_Error ("R_DrawTranslatedColumn: %i to %i at %i", dc_yl, dc_yh, dc_x);
-#endif
-
-#ifdef __DJGPP__
-	if (detailshift)
-	{
-		if (dc_x & 1)
-			outp (SC_INDEX+1,12); 
-		else
-			outp (SC_INDEX+1,3);
-	
-		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>1); 
-	}
-	else
-	{
-		outp (SC_INDEX+1,1<<(dc_x&3)); 
-		dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2); 
-	}
-#else
-	dest = destview + dc_yl*PLANEWIDTH + (dc_x>>2) + ((dc_x & 3) << 16);
-#endif
-	
-	fracstep = dc_iscale;
-	frac = dc_texturemid + (dc_yl-centery)*fracstep;
-
-	do
-	{
-		*dest = dc_colormap[dc_translation[dc_source[frac>>FRACBITS]]];
-		dest += PLANEWIDTH;
-		frac += fracstep;
-	} while (count--);
+    unsigned bytes = colormap_count * COLORMAP_SIZE;
+    translated_colormaps = Z_Malloc(PLAYER_TRANSLATIONS * bytes + 255, PU_STATIC, 0);
+    translated_colormaps = (byte *)(((uintptr_t)translated_colormaps + 255) & ~(uintptr_t)255);
+    R_BuildTranslatedColormaps(translated_colormaps, colormaps, colormap_count);
 }
 
-/*
-========================
-=
-= R_InitTranslationTables
-=
-========================
-*/
-
-void R_InitTranslationTables (void)
+lighttable_t *R_TranslatedColormap(lighttable_t *map, unsigned translation)
 {
-	int32_t		i;
-
-	translationtables = Z_Malloc (256*3+255, PU_STATIC, 0);
-	translationtables = (byte *)(( (int32_t)translationtables + 255 )& ~255);
-
-//
-// translate just the 16 green colors
-//
-	for(i = 0; i < 256; i++)
-	{
-		if (i >= 0x70 && i<= 0x7f)
-		{	// map green ramp to gray, brown, red
-			translationtables[i] = 0x60 + (i&0xf);
-			translationtables [i+256] = 0x40 + (i&0xf);
-			translationtables [i+512] = 0x20 + (i&0xf);
-		}
-		else
-		{
-			translationtables[i] = translationtables[i+256] 
-			= translationtables[i+512] = i;
-		}
-	}
+    unsigned offset = (unsigned)(map - colormaps);
+#ifdef RANGECHECK
+    if (translation >= PLAYER_TRANSLATIONS || offset % COLORMAP_SIZE
+        || offset / COLORMAP_SIZE >= colormap_count) I_Error("Invalid translated colormap");
+#endif
+    return translated_colormaps + translation * colormap_count * COLORMAP_SIZE + offset;
 }
 
 /*
@@ -304,134 +154,39 @@ fixed_t			ds_xstep;
 fixed_t			ds_ystep;
 byte			*ds_source;		// start of a 64*64 tile image
 
-void R_DrawSpan (void) 
-{ 
-    fixed_t		frac;
-    fixed_t		dfrac; 
-    byte*		dest; 
-	int32_t                     dsp_x1;
-	int32_t                     dsp_x2;
-	int32_t                     countp;
-         
-#ifdef RANGECHECK 
-    if (ds_x2 < ds_x1
-        || ds_x1<0
-        || ds_x2>=SCREENWIDTH  
-        || (uint32_t)ds_y>SCREENHEIGHT)
-    {
-        I_Error( "R_DrawSpan: %i to %i at %i",
-                 ds_x1,ds_x2,ds_y);
-    } 
-#endif 
-
-	frac = (((ds_xfrac - ds_xstep) >> 6) & 0xFFFF) | ((ds_yfrac << 10) & 0xFFFF0000);
-	dfrac = ((ds_xstep >> 6) & 0xFFFF) | ((ds_ystep << 10) & 0xFFFF0000);
-	lighttable_t *colormap = ds_colormap;
-	int count = ds_x2 - ds_x1;
-	if (count < 0) return;
-	#pragma GCC unroll 4
-	for (int i = 0; i < 4; i++) {
-		dsp_x1 = (unsigned)(ds_x1 + i) >> 2;
-		countp = (count - i ) >> 2;
-		if (countp < 0) break;
-
-		uint32_t plane = (ds_x1 + i) & 3;
-#ifdef __DJGPP__
-		outp (SC_INDEX + 1, 1 << plane);
-		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1;
-#else
-		dest = destview + ds_y*PLANEWIDTH + dsp_x1 + (countp & 31) + 1 + (plane << 16);
+static void R_DrawSpanShared(int low)
+{
+    if (ds_x2 < ds_x1) return;
+#ifdef RANGECHECK
+    if (ds_x1 < 0 || (ds_x2 << low) >= scaledviewwidth || ds_y < 0 || ds_y >= viewheight)
+        I_Error("Bad span: %i..%i at %i", ds_x1, ds_x2, ds_y);
 #endif
+    unsigned step = I_SpanStep(low);
+    uint32_t frac = R_PackSpan(ds_xfrac, ds_yfrac);
+    uint32_t fracstep = R_PackSpan(ds_xstep, ds_ystep);
+    span_scaler_t *scale = I_WordPixels(low) ? R_ScaleSpanWord : R_ScaleSpan;
+    for (unsigned pass = 0; pass < I_SpanPasses(low); pass++) {
+        int first = ds_x1 + pass;
+        if (first > ds_x2) break;
+        unsigned count = (ds_x2 - first) / step + 1;
+        byte *dest = I_ColumnAddress(destview, first << low, ds_y, low);
+        scale(dest, I_SpanAdvance(low), count, ds_source, ds_colormap,
+                    frac + fracstep * pass, fracstep * step);
+        unsigned second = I_SoftwarePlaneOffset(low);
+        if (second)
+            R_ScaleSpan(dest + second, I_SpanAdvance(low), count, ds_source, ds_colormap,
+                        frac + fracstep * pass, fracstep * step);
+    }
+}
 
-		loop_count = countp >> 5;
-		// add edi, 32  // 3 bytes
-		// 32 unrolled 19 bytes sequence
-		call_dest = (char*)R_ScaleRowAsm + 3 + 32 * 19 - 19 * ((countp & 31) + 1);
-
-		dfrac <<= 2;
-		fixed_t frac2 = frac;
-		fixed_t frac3 = frac;
-		asm volatile("call *(_call_dest)": "+a"(colormap), "+c"(frac2), "+d"(frac3): "D"(dest), "S"(ds_source), "b"(dfrac) : "memory");
-		dfrac >>=2;
-		frac += dfrac;
-	}
+void R_DrawSpan (void)
+{
+    R_DrawSpanShared(0);
 } 
 
 void R_DrawSpanLow (void) 
-{ 
-#ifdef __DJGPP__
-    fixed_t		xfrac;
-    fixed_t		yfrac; 
-    byte*		dest; 
-    int32_t		spot; 
-        int32_t                     prt;
-        int32_t                     dsp_x1;
-        int32_t                     dsp_x2;
-        int32_t                     countp;
-         
-#ifdef RANGECHECK 
-    if (ds_x2 < ds_x1
-        || ds_x1<0
-        || ds_x2>=SCREENWIDTH  
-        || (uint32_t)ds_y>SCREENHEIGHT)
-    {
-        I_Error( "R_DrawSpanLow: %i to %i at %i",
-                 ds_x1,ds_x2,ds_y);
-    } 
-#endif 
-
-	dsp_x1 = (ds_x1)/2 + (ds_x1&1);
-	dsp_x2 = ds_x2/2;
-	countp = dsp_x2 - dsp_x1;
-	if (countp >= 0) {
-		outp (SC_INDEX+1,3); 
-		dest = destview + ds_y*PLANEWIDTH + dsp_x1;
-
-		prt = dsp_x1*2-ds_x1;
-		xfrac = ds_xfrac+ds_xstep*prt; 
-		yfrac = ds_yfrac+ds_ystep*prt;
-
-		do
-		{
-			// Current texture index in u,v.
-			spot = ((yfrac>>(16-6))&(63*64)) + ((xfrac>>16)&63);
-
-			// Lookup pixel from flat texture tile,
-			//  re-index using light/colormap.
-			*dest++ = ds_colormap[ds_source[spot]];
-			// Next step in u,v.
-			xfrac += ds_xstep*2;
-			yfrac += ds_ystep*2;
-		} while (countp--);
-	}
-
-	dsp_x1 = (ds_x1-1)/2;
-	if (dsp_x1*2+1<ds_x1)
-		dsp_x1++;
-	dsp_x2 = (ds_x2-1)/2;
-	countp = dsp_x2 - dsp_x1;
-	if (countp >= 0) {
-		outp (SC_INDEX+1,12); 
-		dest = destview + ds_y*PLANEWIDTH + dsp_x1;
-
-		prt = dsp_x1*2-ds_x1+1;
-		xfrac = ds_xfrac+ds_xstep*prt; 
-		yfrac = ds_yfrac+ds_ystep*prt;
-
-		do
-		{
-			// Current texture index in u,v.
-			spot = ((yfrac>>(16-6))&(63*64)) + ((xfrac>>16)&63);
-
-			// Lookup pixel from flat texture tile,
-			//  re-index using light/colormap.
-			*dest++ = ds_colormap[ds_source[spot]];
-			// Next step in u,v.
-			xfrac += ds_xstep*2;
-			yfrac += ds_ystep*2;
-		} while (countp--);
-	}
-#endif
+{
+    R_DrawSpanShared(1);
 }
 
 
@@ -519,53 +274,20 @@ void R_FillBackScreen (void)
 	V_DrawPatch (viewwindowx+scaledviewwidth, viewwindowy+viewheight, 1,
 		W_CacheLumpName ("brdr_br",PU_CACHE));
 
-#ifdef __DJGPP__
-	dest = (byte*)(0xac000 + __djgpp_conventional_base);
-	src = screens[1];
-	for (i = 0; i < 4; i++, src++)
-	{
-		outp (SC_INDEX, 2);
-		outp (SC_INDEX+1, 1<<i);
-		for (j = 0; j < (SCREENHEIGHT-SBARHEIGHT)*SCREENWIDTH/4; j++)
-			dest[j] = src[j*4];
-	}
-#else
-	dest = 0xc000 + screen;
-	src = screens[1];
-	for (i = 0; i < 4; i++, src++)
-	{
-		for (j = 0; j < (SCREENHEIGHT-SBARHEIGHT)*SCREENWIDTH/4; j++)
-			dest[j + (i << 16)] = src[j*4];
-	}
-#endif
+
 }
 
 
 void R_VideoErase (uint32_t ofs, int32_t count)
-{ 
-	int32_t		i;
-	byte	*src, *dest;
-#ifdef __DJGPP__
-	outp (SC_INDEX, SC_MAPMASK);
-	outp (SC_INDEX+1, 15);
-	outp (GC_INDEX, GC_MODE);
-	outp (GC_INDEX+1, inp (GC_INDEX+1)|1);
-	src = (byte*)(0xac000 + __djgpp_conventional_base + (ofs>>2));
-	dest = destscreen+(ofs>>2);
-	for (i = (count>>2)-1; i >= 0; i--)
-	{
-		dest[i] = src[i];
-	}
-	outp (GC_INDEX, GC_MODE);
-	outp (GC_INDEX+1, inp (GC_INDEX+1)&~1);
-#else
-	src = (byte*)(screen + 0xc000 + (ofs>>2));
-	dest = destscreen+(ofs>>2);
-	for (int i = 0; i < 4; i++) {
-		
-		memcpy (dest + (i << 16), src + (i << 16), count >> 2);
-	}
-#endif
+{
+    while (count > 0) {
+        unsigned x = ofs % SCREENWIDTH, y = ofs / SCREENWIDTH;
+        unsigned width = SCREENWIDTH - x;
+        if (width > (unsigned)count) width = count;
+        I_BlitRect(screens[1], SCREENWIDTH, x, y, width, 1);
+        ofs += width;
+        count -= width;
+    }
 }
 
 

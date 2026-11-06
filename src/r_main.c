@@ -20,6 +20,7 @@
 
 #include "doomdef.h"
 #include "r_local.h"
+#include "i_video.h"
 /*
 
 */
@@ -78,7 +79,6 @@ int32_t			extralight;			// bumped light from gun blasts
 void		(*colfunc) (void);
 void		(*basecolfunc) (void);
 void		(*fuzzcolfunc) (void);
-static void		(*transcolfunc) (void);
 void		(*spanfunc) (void);
 
 /*
@@ -493,14 +493,12 @@ void R_ExecuteSetViewSize (void)
 	{
 		colfunc = basecolfunc = R_DrawColumn;
 		fuzzcolfunc = R_DrawFuzzColumn;
-		transcolfunc = R_DrawTranslatedColumn;
 		spanfunc = R_DrawSpan;
 	}
 	else
 	{
 		colfunc = basecolfunc = R_DrawColumnLow;
 		fuzzcolfunc = R_DrawFuzzColumn;
-		transcolfunc = R_DrawTranslatedColumn;
 		spanfunc = R_DrawSpanLow;
 	}
 
@@ -580,7 +578,7 @@ void R_Init (void)
 	R_InitSkyMap ();
 	R_InitVisplanes();
 	printf (".");
-	R_InitTranslationTables();
+	R_InitTranslatedColormaps();
 	framecount = 0;
 }
 
@@ -648,7 +646,7 @@ static void R_SetupFrame (player_t *player)
 	framecount++;
 	validcount++;
 
-	destview = destscreen+(viewwindowx>>2)+viewwindowy*PLANEWIDTH;
+    destview = I_ViewAddress(destscreen, viewwindowx, viewwindowy);
 }
 
 /*

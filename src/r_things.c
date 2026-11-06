@@ -363,9 +363,8 @@ static void R_DrawVisSprite (vissprite_t *vis)
 		colfunc = fuzzcolfunc;		// NULL colormap = shadow draw
 	else if (vis->mobjflags & MF_TRANSLATION)
 	{
-		colfunc = R_DrawTranslatedColumn;
-		dc_translation = translationtables - 256 +
-			( (vis->mobjflags & MF_TRANSLATION) >> (MF_TRANSSHIFT-8) );
+        unsigned translation = ((vis->mobjflags & MF_TRANSLATION) >> MF_TRANSSHIFT) - 1;
+        dc_colormap = R_TranslatedColormap(dc_colormap, translation);
 	}
 
 	dc_iscale = abs(vis->xiscale)>>detailshift;

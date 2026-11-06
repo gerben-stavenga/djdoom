@@ -19,6 +19,7 @@
 // V_video.c
 
 #include "doomdef.h"
+#include "i_video.h"
 
 //
 // Background and foreground screen numbers
@@ -210,50 +211,23 @@ void V_DrawPatchFlipped (int32_t x, int32_t y, int32_t scrn, patch_t *patch)
 
 void V_DrawPatchDirect (int32_t x, int32_t y, patch_t *patch)
 {
-	int32_t		count,col;
-	column_t	*column;
-	byte		*desttop, *dest, *source;
-	int32_t		w;
-	
-	y -= SHORT(patch->topoffset);
-	x -= SHORT(patch->leftoffset);
+    y -= SHORT(patch->topoffset);
+    x -= SHORT(patch->leftoffset);
 #ifdef RANGECHECK
-	if (x<0||x+SHORT(patch->width) >SCREENWIDTH || y<0 || y+SHORT(patch->height)>SCREENHEIGHT)
-		I_Error ("Bad V_DrawPatchDirect");
+    if (x < 0 || y < 0 || x + SHORT(patch->width) > SCREENWIDTH
+        || y + SHORT(patch->height) > SCREENHEIGHT) I_Error("Bad direct patch");
 #endif
-
-//	V_MarkRect (x, y, SHORT(patch->width), SHORT(patch->height));
-	desttop = destscreen + y*SCREENWIDTH/4 + (x>>2);
-	
-	w = SHORT(patch->width);
-	for ( col = 0 ; col<w ; col++)
-	{
-#ifdef __DJGPP__
-		uint32_t plane = 0;
-		outp (SC_INDEX+1,1<<(x&3));
-#else
-		uint32_t plane = (x&3) << 16;
-#endif
-		column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
-
-// step through the posts in a column
-	
-		while (column->topdelta != 0xff )
-		{
-			source = (byte *)column + 3;
-			dest = desttop + column->topdelta*SCREENWIDTH/4 + plane;
-			count = column->length;
-			
-			while (count--)
-			{
-				*dest = *source++;
-				dest += SCREENWIDTH/4;
-			}
-			column = (column_t *)(  (byte *)column + column->length + 4 );
-		}
-		if ( ((++x)&3) == 0 )
-			desttop++;	// go to next byte, not next plane
-	}
+    for (int col = 0; col < SHORT(patch->width); col++) {
+        byte *top = I_ColumnAddress(destscreen, x + col, y, 0);
+        column_t *column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
+        while (column->topdelta != 0xff) {
+            const byte *source = (byte *)column + 3;
+            byte *dest = top + column->topdelta * video_pitch;
+            for (int count = column->length; count; count--, dest += video_pitch)
+                *dest = *source++;
+            column = (column_t *)((byte *)column + column->length + 4);
+        }
+    }
 }
 
 /*

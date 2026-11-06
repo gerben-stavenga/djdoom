@@ -16,7 +16,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 //
 
-#include "../id_heads.h"
+#include "common.h"
 #include "a_taskmn.h"
 #include "a_tsmapi.h"
 

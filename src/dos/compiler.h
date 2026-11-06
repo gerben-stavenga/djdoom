@@ -28,8 +28,6 @@
 #include <sys/nearptr.h>
 #include <pc.h>
 
-#define mkdir(x) mkdir(x,0)
-
 //DJGPP doesn't inline inp, outp and outpw,
 //but it does inline inportb, outportb and outportw
 #define inp(port)			inportb(port)
@@ -62,30 +60,6 @@ asm								\
 )
 
 #else
-
-#include <ctype.h>
-#include <sys/stat.h>
-
-#define mkdir(x) mkdir(x,0)
-
-static char* strupr(char* s)
-{
-    char* tmp = s;
-
-    for (;*tmp;++tmp) {
-        *tmp = toupper((unsigned char) *tmp);
-    }
-
-    return s;
-}
-
-static long filelength(int fd)
-{
-	struct stat st;
-	if (fstat(fd, &st) == -1)
-		return -1;
-	return st.st_size;
-}
 
 #endif
 

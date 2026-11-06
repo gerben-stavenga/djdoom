@@ -25,7 +25,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "compiler.h"
 
 #ifndef __BYTEBOOL__
 #define __BYTEBOOL__

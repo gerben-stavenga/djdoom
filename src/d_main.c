@@ -999,15 +999,15 @@ void D_DoomMain (void)
 	{
 		printf(D_CDROM);
 #ifdef __linux__
-		mkdir("/tmp/doomdata");
+		mkdir("/tmp/doomdata", 0);
 		strcpy (basedefault,"/tmp/doomdata/default.cfg");
 #else
 #if (APPVER_DOOMREV < AV_DR_DM1666E)
-		mkdir("c:doomdata");
+		mkdir("c:doomdata", 0);
 #elif (APPVER_DOOMREV < AV_DR_DM17)
-		mkdir("c:doomdata",0);
+		mkdir("c:doomdata", 0);
 #else
-		mkdir("c:\\doomdata");
+		mkdir("c:\\doomdata", 0);
 #endif
 		strcpy (basedefault,"c:/doomdata/default.cfg");
 #endif

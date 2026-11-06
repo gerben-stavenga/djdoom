@@ -65,6 +65,7 @@ fixed_t		*spriteoffset;
 fixed_t		*spritetopoffset;
 
 lighttable_t	*colormaps;
+unsigned colormap_count;
 
 
 /*
@@ -495,8 +496,10 @@ static void R_InitColormaps (void)
 // 256 byte align tables
 //
 	lump = W_GetNumForName("COLORMAP");
-	length = W_LumpLength (lump) + 255;
-	colormaps = Z_Malloc (length, PU_STATIC, 0);
+    length = W_LumpLength(lump);
+    if (length <= 0 || length % 256) I_Error("Invalid COLORMAP size");
+    colormap_count = (unsigned)length / 256;
+    colormaps = Z_Malloc(length + 255, PU_STATIC, 0);
 	colormaps = (byte *)( ((int32_t)colormaps + 255)&~0xff);
 	W_ReadLump (lump,colormaps);
 }
