@@ -769,20 +769,26 @@ static void M_DrawReadThis1(void)
 //
 // Read This Menus - optional second page.
 //
+/* Shareware/registered IWADs provide HELP1; retail IWADs may provide HELP. */
+static char *M_HelpLump(void)
+{
+    return W_CheckNumForName("HELP") >= 0 ? "HELP" : "HELP1";
+}
+
 static void M_DrawReadThis2(void)
 {
 	inhelpscreens = true;
 #if (APPVER_DOOMREV < AV_DR_DM19F) || APPVER_CHEX
 	V_DrawPatchDirect (0,0,W_CacheLumpName("HELP1",PU_CACHE));
 #else
-	V_DrawPatchDirect (0,0,W_CacheLumpName("HELP",PU_CACHE));
+	V_DrawPatchDirect (0,0,W_CacheLumpName(M_HelpLump(),PU_CACHE));
 #endif
 }
 
 static void M_DrawReadThisRetail(void)
 {
 	inhelpscreens = true;
-	V_DrawPatchDirect (0,0,W_CacheLumpName("HELP",PU_CACHE));
+	V_DrawPatchDirect (0,0,W_CacheLumpName(M_HelpLump(),PU_CACHE));
 }
 
 
@@ -1805,6 +1811,12 @@ void M_Init (void)
 	messageString = NULL;
 	messageLastMenuActive = menuactive;
 	quickSaveSlot = -1;
+
+#if (APPVER_DOOMREV >= AV_DR_DM19UP) && !APPVER_CHEX
+    /* The executable also runs older Doom IWADs without episode four. */
+    if (W_CheckNumForName("E4M1") < 0 || W_CheckNumForName("M_EPI4") < 0)
+        EpiDef.numitems = ep4;
+#endif
 
 	if (commercial)
 	{
